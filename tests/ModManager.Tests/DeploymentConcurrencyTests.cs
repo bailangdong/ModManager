@@ -174,6 +174,13 @@ public sealed class DeploymentConcurrencyTests
         Assert.False(File.Exists(Path.Combine(gameRoot, "Mods", "plugins", "a.dll")));
         Assert.False(File.Exists(Path.Combine(gameRoot, "Mods", "plugins", "b.dll")));
         Assert.Equal("user file", await File.ReadAllTextAsync(unrelated));
+
+        // A second uninstall has no manifest to act on. It must not fall back to deleting whatever
+        // happens to be at the old path.
+        var repeated = await host.Install.UninstallAsync(
+            GameId, stagedA.Metadata.Id, adapter, gameRoot, deleteModifiedFiles: false, host.Logger);
+        Assert.True(repeated.Succeeded, repeated.Error);
+        Assert.Equal("user file", await File.ReadAllTextAsync(unrelated));
     }
 
     private static async Task<StagedMod> StageAsync(
