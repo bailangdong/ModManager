@@ -91,6 +91,16 @@ public sealed record GameDefinition
     public IReadOnlyList<string> StripPrefixes { get; init; } = [];
 
     /// <summary>
+    /// Declarative source-to-target rules for mods that legitimately write more than one directory.
+    /// </summary>
+    /// <remarks>
+    /// A rule matches a staged path by prefix, strips that prefix, and places the remainder under
+    /// <see cref="InstallTargetRule.TargetRoot"/> (relative to the install directory). The longest
+    /// matching prefix wins. With no rule, the file keeps the game's normal mod root.
+    /// </remarks>
+    public IReadOnlyList<InstallTargetRule> InstallTargets { get; init; } = [];
+
+    /// <summary>
     /// Vanilla files the game ships inside the mod root, lower-case. An unowned file matching one
     /// of these is base-game content, not a foreign mod. A trailing <c>*</c> means prefix match.
     /// </summary>
@@ -207,6 +217,17 @@ public enum InstallProbeKind
     /// </summary>
     Xbox = 6,
 }
+
+/// <summary>
+/// A declared target for one class of staged files, e.g. <c>config/</c> to <c>BepInEx/config</c>.
+/// </summary>
+/// <param name="SourcePrefix">Forward-slash staged prefix, matched case-insensitively.</param>
+/// <param name="TargetRoot">Target directory relative to the game install directory.</param>
+/// <param name="StripSourcePrefix">True to remove <paramref name="SourcePrefix"/> before combining.</param>
+public sealed record InstallTargetRule(
+    string SourcePrefix,
+    string TargetRoot,
+    bool StripSourcePrefix = true);
 
 /// <summary>A registry location that identifies an install. Modrix parity: <c>[[registry_keys]]</c>.</summary>
 /// <param name="Hive">Registry hive, e.g. <c>HKLM</c>.</param>

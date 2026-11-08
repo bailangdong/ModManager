@@ -122,6 +122,18 @@ public static class GameCatalogue
         // so both packaging styles land in the same place.
         StripPrefixes = ["BepInEx/plugins", "BepInEx"],
 
+        // BepInEx is one loader with several sibling trees. A config or patcher that ships beside the
+        // plugin must not be flattened into plugins/ where the loader never reads it.
+        InstallTargets =
+        [
+            new("BepInEx/plugins", "BepInEx/plugins"),
+            new("BepInEx/config", "BepInEx/config"),
+            new("BepInEx/patchers", "BepInEx/patchers"),
+            new("plugins", "BepInEx/plugins"),
+            new("config", "BepInEx/config"),
+            new("patchers", "BepInEx/patchers"),
+        ],
+
         ModFileExtensions = ["dll", "json", "cfg", "png", "txt"],
         Loader = new ModLoaderDefinition
         {
@@ -171,6 +183,16 @@ public static class GameCatalogue
         RequiredFiles = ["Subnautica.exe"],
         ContentDirectories = ["bepinex", "qmods", "plugins", "patchers", "config", "core", "fomod"],
         StripPrefixes = ["BepInEx/plugins", "BepInEx", "QMods"],
+
+        InstallTargets =
+        [
+            new("BepInEx/plugins", "BepInEx/plugins"),
+            new("BepInEx/config", "BepInEx/config"),
+            new("BepInEx/patchers", "BepInEx/patchers"),
+            new("plugins", "BepInEx/plugins"),
+            new("config", "BepInEx/config"),
+            new("patchers", "BepInEx/patchers"),
+        ],
         ModFileExtensions = ["dll", "json", "cfg", "txt", "png"],
 
         // Deliberately NO LoadOrder: BepInEx discovers plugins and orders them by their declared

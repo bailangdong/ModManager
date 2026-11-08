@@ -63,14 +63,15 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         var enabled = OrderEnabledMods(profile, mods);
         var warnings = new List<string>();
 
-        var resolved = ResolveDesiredTree(enabled, warnings);
+        var resolved = ResolveDesiredTree(definition, installPath, enabled, warnings);
+        deploymentRoot = FindCommonRoot(resolved.Desired.Values.Select(provider => provider.BaseRoot));
 
         // Overrides come from two places: the profile's own per-path decisions, and the repository's
         // rules. Profile decisions win, because they are the more specific, more recent statement of
         // intent. Both are applied here so the plan and the reported conflicts agree.
         var overrides = MergeOverrides(profile, conflictOverrides);
-        ApplyOverrides(resolved, overrides, warnings);
-        var conflicts = BuildConflicts(resolved, overrides);
+        ApplyOverrides(resolved, overrides, deploymentRoot, definition, installPath, warnings);
+        var conflicts = BuildConflicts(resolved, overrides, deploymentRoot);
 
         return BuildOperations(definition, profile, deploymentRoot, enabled, mods, resolved, conflicts, warnings);
     }
@@ -93,18 +94,20 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         var ordered = existingMods.ToList();
         ordered.Add(new ModSetEntry(mod, null, mod.StagingPath));
 
-        var resolved = ResolveDesiredTree(ordered, warnings);
-        var previewConflicts = BuildConflicts(resolved, new Dictionary<string, ConflictResolution>(StringComparer.OrdinalIgnoreCase));
+        var resolved = ResolveDesiredTree(definition, installPath, ordered, warnings);
+        deploymentRoot = FindCommonRoot(resolved.Desired.Values.Select(provider => provider.BaseRoot));
+        var previewConflicts = BuildConflicts(resolved, new Dictionary<string, ConflictResolution>(StringComparer.OrdinalIgnoreCase), deploymentRoot);
 
         var files = new List<PlannedFile>();
         var operations = new List<FileOperation>();
         var rejections = new List<string>();
 
-        foreach (var (relativeTarget, provider) in resolved.Desired)
+        foreach (var (absoluteTarget, provider) in resolved.Desired)
         {
             if (string.Equals(provider.ModId, mod.Id, StringComparison.Ordinal))
             {
-                var safety = ClassifyPath(definition.Id, deploymentRoot, relativeTarget, out var note, out var absolute);
+                var relativeTarget = RelativeTo(deploymentRoot, absoluteTarget);
+                var safety = ClassifyAbsolutePath(definition.Id, absoluteTarget, out var note);
                 if (safety == PathSafetyVerdict.Unsafe)
                 {
                     rejections.Add($"{relativeTarget}: {note}");
@@ -115,7 +118,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
                 files.Add(new PlannedFile(relativeTarget, provider.SourcePath, provider.ModId, safety, note));
                 operations.Add(new PlaceFileOperation
                 {
-                    TargetPath = absolute,
+                    TargetPath = absoluteTarget,
                     RelativeTarget = relativeTarget,
                     SourcePath = provider.SourcePath,
                     ModId = provider.ModId,
@@ -196,34 +199,36 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     /// compact. The extra memory is bounded by the number of contested paths, which is small.
     /// </remarks>
     private ResolutionResult ResolveDesiredTree(
+        GameDefinition definition,
+        string installPath,
         IReadOnlyList<ModSetEntry> orderedMods,
         List<string> warnings)
     {
-        var contenders = new SortedDictionary<string, List<ProviderEntry>>(StringComparer.Ordinal);
+        var contenders = new SortedDictionary<string, List<ProviderEntry>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var mod in orderedMods)
         {
-            foreach (var (relativeTarget, sourcePath) in EnumerateStagedFiles(mod, warnings))
+            foreach (var (absoluteTarget, baseRoot, sourcePath, evidence) in EnumerateStagedFiles(definition, installPath, mod, warnings))
             {
-                if (!contenders.TryGetValue(relativeTarget, out var providers))
+                if (!contenders.TryGetValue(absoluteTarget, out var providers))
                 {
                     providers = [];
-                    contenders[relativeTarget] = providers;
+                    contenders[absoluteTarget] = providers;
                 }
 
                 // Same mod providing the same target twice: the last one wins and this is not a
                 // conflict, because a mod cannot disagree with itself.
                 if (providers.Count > 0 && string.Equals(providers[^1].ModId, mod.Metadata.Id, StringComparison.Ordinal))
                 {
-                    providers[^1] = new ProviderEntry(mod.Metadata.Id, sourcePath);
+                    providers[^1] = new ProviderEntry(mod.Metadata.Id, sourcePath, absoluteTarget, baseRoot, evidence);
                     continue;
                 }
 
-                providers.Add(new ProviderEntry(mod.Metadata.Id, sourcePath));
+                providers.Add(new ProviderEntry(mod.Metadata.Id, sourcePath, absoluteTarget, baseRoot, evidence));
             }
         }
 
-        var desired = new SortedDictionary<string, ProviderEntry>(StringComparer.Ordinal);
+        var desired = new SortedDictionary<string, ProviderEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var (target, providers) in contenders)
         {
             desired[target] = providers[^1];
@@ -275,25 +280,30 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     private static void ApplyOverrides(
         ResolutionResult resolved,
         Dictionary<string, ConflictResolution> overrides,
+        string deploymentRoot,
+        GameDefinition definition,
+        string installPath,
         List<string> warnings)
     {
-        foreach (var (target, rule) in overrides)
+        foreach (var (key, rule) in overrides)
         {
             if (rule.RelativeTarget == "*")
             {
                 continue;
             }
 
+            var target = ResolveOverrideTarget(key, deploymentRoot, definition, installPath, resolved);
+
             if (!resolved.Contenders.TryGetValue(target, out var contenders))
             {
-                warnings.Add($"Conflict rule for '{target}' was ignored: no enabled mod provides that file.");
+                warnings.Add($"Conflict rule for '{key}' was ignored: no enabled mod provides that file.");
                 continue;
             }
 
             var named = contenders.FirstOrDefault(c => string.Equals(c.ModId, rule.ModId, StringComparison.Ordinal));
             if (named is null)
             {
-                warnings.Add($"Conflict rule for '{target}' was ignored: '{rule.ModId}' does not provide that file.");
+                warnings.Add($"Conflict rule for '{key}' was ignored: '{rule.ModId}' does not provide that file.");
                 continue;
             }
 
@@ -305,6 +315,40 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
 
             resolved.Desired[target] = named;
         }
+    }
+
+    /// <summary>
+    /// Maps a stored relative override to the absolute target it names. The same path can be stored
+    /// relative to the mod root, to the common deployment root, or to a rule root, so the lookup tries
+    /// the known roots and picks the one that actually exists in the contender set.
+    /// </summary>
+    private static string ResolveOverrideTarget(
+        string key,
+        string deploymentRoot,
+        GameDefinition definition,
+        string installPath,
+        ResolutionResult resolved)
+    {
+        if (Path.IsPathRooted(key))
+        {
+            return Path.GetFullPath(key);
+        }
+
+        var candidates = new[]
+        {
+            Path.GetFullPath(SafeCombine(deploymentRoot, key)),
+            Path.GetFullPath(SafeCombine(ResolveDeploymentRoot(definition, installPath), key)),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (resolved.Contenders.ContainsKey(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return candidates[0];
     }
 
     /// <summary>
@@ -320,7 +364,8 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     /// </remarks>
     private static IReadOnlyList<FileConflict> BuildConflicts(
         ResolutionResult resolved,
-        Dictionary<string, ConflictResolution> overrides)
+        Dictionary<string, ConflictResolution> overrides,
+        string deploymentRoot)
     {
         var conflicts = new List<FileConflict>();
 
@@ -349,14 +394,25 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
                 .ToList();
 
             conflicts.Add(new FileConflict(
-                target,
+                RelativeTo(deploymentRoot, target),
                 winner.ModId,
                 shadowed,
                 pinned ? ConflictResolutionKind.PreferMod : ConflictResolutionKind.Undecided,
                 IsBlocking: false,
                 Reason: pinned
                     ? $"'{winner.ModId}' supplies this file because you set a rule for it."
-                    : $"'{winner.ModId}' loads after {string.Join(", ", shadowed.Select(m => $"'{m}'"))}, so it supplies this file."));
+                    : $"'{winner.ModId}' loads after {string.Join(", ", shadowed.Select(m => $"'{m}'"))}, so it supplies this file.")
+            {
+                AbsoluteTarget = target,
+                Providers = contenders
+                    .Select(c => new FileConflictProvider(
+                        c.ModId,
+                        c.SourcePath,
+                        c.BaseRoot,
+                        c.Evidence,
+                        string.Equals(c.ModId, winner.ModId, StringComparison.Ordinal)))
+                    .ToList(),
+            });
         }
 
         return conflicts;
@@ -374,9 +430,13 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     /// undeployable, and it keeps editor and OS droppings (<c>.git</c>, <c>.DS_Store</c>,
     /// <c>Thumbs.db</c>) out of the game folder.
     /// </remarks>
-    private List<(string RelativeTarget, string SourcePath)> EnumerateStagedFiles(ModSetEntry mod, List<string> warnings)
+    private List<(string AbsoluteTarget, string BaseRoot, string SourcePath, string Evidence)> EnumerateStagedFiles(
+        GameDefinition definition,
+        string installPath,
+        ModSetEntry mod,
+        List<string> warnings)
     {
-        var results = new List<(string, string)>();
+        var results = new List<(string, string, string, string)>();
         var root = mod.StagingRoot;
 
         if (!Directory.Exists(FileSystemOps.ToExtendedPath(root)))
@@ -401,7 +461,8 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
                 continue;
             }
 
-            results.Add((relative, file));
+            var target = InstallTargetResolver.Resolve(definition, installPath, relative);
+            results.Add((target.AbsolutePath, target.BaseRoot, file, target.Evidence));
         }
 
         results.Sort((left, right) => string.CompareOrdinal(left.Item1, right.Item1));
@@ -410,7 +471,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
 
     /// <summary>True when a staged relative path must never be deployed.</summary>
     /// <param name="relativePath">Forward-slash relative path.</param>
-    private static bool IsExcluded(string relativePath)
+    internal static bool IsExcluded(string relativePath)
     {
         foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -489,7 +550,12 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
 
             foreach (var deployed in manifest.Files)
             {
-                var stillOurs = desired.TryGetValue(deployed.RelativeTarget, out var provider)
+                var manifestRoot = string.IsNullOrWhiteSpace(manifest.DeploymentRoot)
+                    ? deploymentRoot
+                    : manifest.DeploymentRoot;
+                var absoluteTarget = Path.GetFullPath(SafeCombine(manifestRoot, deployed.RelativeTarget));
+
+                var stillOurs = desired.TryGetValue(absoluteTarget, out var provider)
                     && string.Equals(provider.ModId, deployed.ModId, StringComparison.Ordinal);
 
                 if (stillOurs)
@@ -501,36 +567,38 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
                 // deleted first: the placement itself backs the existing file up and records it, which
                 // keeps both mods' claims truthful and lets the winner's uninstall restore the loser's
                 // file. Deleting first would destroy that provenance.
-                if (desired.ContainsKey(deployed.RelativeTarget))
+                if (desired.ContainsKey(absoluteTarget))
                 {
                     continue;
                 }
 
-                var safety = ClassifyPath(definition.Id, deploymentRoot, deployed.RelativeTarget, out var note, out var absolute);
+                var safety = ClassifyAbsolutePath(definition.Id, absoluteTarget, out var note);
+                var relativeTarget = RelativeTo(deploymentRoot, absoluteTarget);
                 if (safety == PathSafetyVerdict.Unsafe)
                 {
-                    warnings.Add($"Refused to remove '{deployed.RelativeTarget}': {note}");
+                    warnings.Add($"Refused to remove '{relativeTarget}': {note}");
                     continue;
                 }
 
                 removes.Add(new DeleteFileOperation
                 {
-                    TargetPath = absolute,
-                    RelativeTarget = deployed.RelativeTarget,
+                    TargetPath = absoluteTarget,
+                    RelativeTarget = relativeTarget,
                     ExpectedHash = deployed.Sha256,
                     ModId = deployed.ModId,
                     BackupPath = deployed.BackupPath,
                     OriginalSha256 = deployed.OriginalSha256,
                 });
 
-                files.Add(new PlannedFile(deployed.RelativeTarget, null, deployed.ModId, PathSafetyVerdict.Overwrite, "Remove: no longer enabled or superseded."));
+                files.Add(new PlannedFile(relativeTarget, null, deployed.ModId, PathSafetyVerdict.Overwrite, "Remove: no longer enabled or superseded."));
             }
         }
 
         // --- additions ------------------------------------------------------------------------
-        foreach (var (relativeTarget, provider) in desired)
+        foreach (var (absoluteTarget, provider) in desired)
         {
-            var safety = ClassifyPath(definition.Id, deploymentRoot, relativeTarget, out var note, out var absolute);
+            var relativeTarget = RelativeTo(deploymentRoot, absoluteTarget);
+            var safety = ClassifyAbsolutePath(definition.Id, absoluteTarget, out var note);
             if (safety == PathSafetyVerdict.Unsafe)
             {
                 warnings.Add($"Refused to deploy '{relativeTarget}': {note}");
@@ -551,20 +619,26 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
                 other.Manifest is { } otherManifest
                 && !string.Equals(other.Metadata.Id, provider.ModId, StringComparison.Ordinal)
                 && otherManifest.Files.Any(file =>
-                    string.Equals(file.RelativeTarget, relativeTarget, StringComparison.OrdinalIgnoreCase)));
+                {
+                    var otherRoot = string.IsNullOrWhiteSpace(otherManifest.DeploymentRoot)
+                        ? deploymentRoot
+                        : otherManifest.DeploymentRoot;
+                    var otherAbsolute = Path.GetFullPath(SafeCombine(otherRoot, file.RelativeTarget));
+                    return string.Equals(otherAbsolute, absoluteTarget, StringComparison.OrdinalIgnoreCase);
+                }));
 
             var scheduledForRemoval = removes
                 .OfType<DeleteFileOperation>()
-                .Any(op => string.Equals(op.RelativeTarget, relativeTarget, StringComparison.OrdinalIgnoreCase));
+                .Any(op => string.Equals(op.TargetPath, absoluteTarget, StringComparison.OrdinalIgnoreCase));
 
             if (!scheduledForRemoval && !claimedByAnotherMod
-                && IsAlreadyDeployed(allMods, relativeTarget, provider, deploymentRoot))
+                && IsAlreadyDeployed(allMods, absoluteTarget, provider))
             {
                 files.Add(new PlannedFile(relativeTarget, provider.SourcePath, provider.ModId, safety, "Unchanged; already deployed."));
                 continue;
             }
 
-            var directory = Path.GetDirectoryName(absolute);
+            var directory = Path.GetDirectoryName(absoluteTarget);
             if (!string.IsNullOrEmpty(directory) && !directories.ContainsKey(directory))
             {
                 directories[directory] = new CreateDirectoryOperation
@@ -576,7 +650,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
 
             places.Add(new PlaceFileOperation
             {
-                TargetPath = absolute,
+                TargetPath = absoluteTarget,
                 RelativeTarget = relativeTarget,
                 SourcePath = provider.SourcePath,
                 ModId = provider.ModId,
@@ -613,16 +687,14 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         };
     }
 
-    /// <summary>True when a manifest already records this mod as providing this path.</summary>
+    /// <summary>True when a manifest already records this mod as providing this absolutely resolved path.</summary>
     /// <param name="mods">Mods with manifests.</param>
-    /// <param name="relativeTarget">Target path.</param>
+    /// <param name="absoluteTarget">Absolute target path.</param>
     /// <param name="provider">Intended provider.</param>
-    /// <param name="deploymentRoot">Absolute deployment root, for the on-disk existence check.</param>
     private static bool IsAlreadyDeployed(
         IReadOnlyList<ModSetEntry> mods,
-        string relativeTarget,
-        ProviderEntry provider,
-        string deploymentRoot)
+        string absoluteTarget,
+        ProviderEntry provider)
     {
         foreach (var mod in mods)
         {
@@ -634,10 +706,19 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
 
             foreach (var deployed in manifest.Files)
             {
-                if (string.Equals(deployed.RelativeTarget, relativeTarget, StringComparison.OrdinalIgnoreCase)
+                var manifestRoot = string.IsNullOrWhiteSpace(manifest.DeploymentRoot)
+                    ? string.Empty
+                    : manifest.DeploymentRoot;
+                if (string.IsNullOrEmpty(manifestRoot))
+                {
+                    continue;
+                }
+
+                var recordedAbsolute = Path.GetFullPath(SafeCombine(manifestRoot, deployed.RelativeTarget));
+                if (string.Equals(recordedAbsolute, absoluteTarget, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(deployed.SourcePath, provider.SourcePath, StringComparison.OrdinalIgnoreCase))
                 {
-                    return FileStillMatchesRecord(deploymentRoot, deployed);
+                    return FileStillMatchesRecord(recordedAbsolute, deployed);
                 }
             }
         }
@@ -648,7 +729,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     /// <summary>
     /// True when the file on disk still looks exactly like the row we recorded for it.
     /// </summary>
-    /// <param name="deploymentRoot">Deployment root.</param>
+    /// <param name="absolute">Absolute path to check.</param>
     /// <param name="deployed">Recorded row.</param>
     /// <remarks>
     /// Existence alone is not enough: when another mod currently supplies the bytes (or the original
@@ -657,9 +738,8 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
     /// Size and last-write time are recorded at deploy time, so a mismatch on either means the file
     /// has been touched since; a row without a recorded time falls back to existence only.
     /// </remarks>
-    private static bool FileStillMatchesRecord(string deploymentRoot, DeployedFile deployed)
+    private static bool FileStillMatchesRecord(string absolute, DeployedFile deployed)
     {
-        var absolute = SafeCombine(deploymentRoot, deployed.RelativeTarget);
         if (!FileSystemOps.ExistsNoFollow(absolute))
         {
             return false;
@@ -691,33 +771,81 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         }
     }
 
-    /// <summary>Classifies one planned path through the safety gate.</summary>
+    /// <summary>Classifies one absolutely resolved target through the safety gate.</summary>
     /// <param name="gameId">Game id.</param>
-    /// <param name="deploymentRoot">Deployment root.</param>
-    /// <param name="relativeTarget">Target path relative to the root.</param>
+    /// <param name="absolute">Absolute target path.</param>
     /// <param name="note">Explanation.</param>
-    /// <param name="absolute">Resolved absolute path.</param>
-    private PathSafetyVerdict ClassifyPath(
+    private PathSafetyVerdict ClassifyAbsolutePath(
         string gameId,
-        string deploymentRoot,
-        string relativeTarget,
-        out string note,
-        out string absolute)
+        string absolute,
+        out string note)
     {
-        absolute = SafeCombine(deploymentRoot, relativeTarget);
-
         var result = _pathSafety.ValidateWrite(gameId, absolute);
         if (!result.Allowed)
         {
             // A refusal is worth a log line even though the caller also surfaces it: when a plan comes
             // back with a path missing, the reason needs to be findable after the UI has moved on.
-            _logger?.Warn("Planner", $"拒绝 “{relativeTarget}”（位于 “{deploymentRoot}”）：{result.Reason}");
+            _logger?.Warn("Planner", $"拒绝 “{absolute}”：{result.Reason}");
             note = result.Reason;
             return PathSafetyVerdict.Unsafe;
         }
 
         note = result.Reason;
         return result.Verdict;
+    }
+
+    /// <summary>Finds the deepest common directory of every resolved target root.</summary>
+    private static string FindCommonRoot(IEnumerable<string> roots)
+    {
+        var list = roots
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (list.Count == 0)
+        {
+            return Path.GetPathRoot(Environment.CurrentDirectory) ?? Environment.CurrentDirectory;
+        }
+
+        var segments = list[0]
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Where(segment => segment.Length > 0)
+            .ToList();
+
+        for (var index = 1; index < list.Count; index++)
+        {
+            var other = list[index]
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Where(segment => segment.Length > 0)
+                .ToArray();
+
+            var shared = 0;
+            while (shared < segments.Count && shared < other.Length
+                   && string.Equals(segments[shared], other[shared], StringComparison.OrdinalIgnoreCase))
+            {
+                shared++;
+            }
+
+            segments = segments.Take(shared).ToList();
+            if (segments.Count == 0)
+            {
+                break;
+            }
+        }
+
+        var prefix = list[0].StartsWith(Path.DirectorySeparatorChar) ? Path.DirectorySeparatorChar.ToString() : string.Empty;
+        var common = prefix + string.Join(Path.DirectorySeparatorChar, segments);
+        return string.IsNullOrEmpty(common)
+            ? Path.GetPathRoot(list[0]) ?? list[0]
+            : common;
+    }
+
+    /// <summary>Expresses an absolute target relative to the common deployment root.</summary>
+    private static string RelativeTo(string root, string absolute)
+    {
+        var relative = Path.GetRelativePath(root, absolute).Replace('\\', '/');
+        return relative == "." ? string.Empty : relative;
     }
 
     /// <summary>
@@ -839,10 +967,18 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()))).ToLowerInvariant();
     }
 
-    /// <summary>One mod's claim on one target path.</summary>
+    /// <summary>One mod's claim on one absolute target path.</summary>
     /// <param name="ModId">Claimant.</param>
     /// <param name="SourcePath">Absolute staged source.</param>
-    private sealed record ProviderEntry(string ModId, string SourcePath);
+    /// <param name="AbsoluteTarget">Absolute game target.</param>
+    /// <param name="BaseRoot">Root that owns this target, used to find the manifest's common root.</param>
+    /// <param name="Evidence">Why this target was chosen.</param>
+    private sealed record ProviderEntry(
+        string ModId,
+        string SourcePath,
+        string AbsoluteTarget,
+        string BaseRoot,
+        string Evidence);
 
     /// <summary>
     /// The resolution outcome: the winning provider per target, plus every contender per target so

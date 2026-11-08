@@ -400,6 +400,20 @@ public sealed class DeploymentApplier : IDeploymentApplier
                 var canonical = check.CanonicalPath!;
                 var keptModified = false;
 
+                // If we recorded a backup but it is gone, deleting the deployed file would leave the
+                // game with a hole and no way to put the original back. Keep the file, report it, and
+                // let the user repair the backup instead.
+                if (file.BackupPath is { Length: > 0 } missingBackup
+                    && !File.Exists(FileSystemOps.ToExtendedPath(missingBackup)))
+                {
+                    warnings.Add(
+                        $"Kept '{file.RelativeTarget}': its backup is missing, so the deployed file was not removed.");
+                    _journals.Append(journal, JournalStepKind.FileDeleted, canonical, "kept: backup missing", succeeded: false);
+                    completed++;
+                    progress?.Report(new DeployProgress(total, completed, file.RelativeTarget, null, 0));
+                    continue;
+                }
+
                 if (FileSystemOps.ExistsNoFollow(canonical))
                 {
                     // "No silent clobber": a file that changed since we deployed it belongs to the
@@ -979,8 +993,11 @@ public sealed class DeploymentApplier : IDeploymentApplier
     /// <param name="excludingModId">Mod doing the placing.</param>
     private static string? FindRowOwner(IReadOnlyList<ModSetEntry> mods, string relativeTarget, string excludingModId)
     {
-        foreach (var mod in mods)
+        // Walk from the top of the load order down. The first manifest that owns this path is the
+        // effective owner: C displaced B, even though A also has a (now shadowed) record for it.
+        for (var i = mods.Count - 1; i >= 0; i--)
         {
+            var mod = mods[i];
             if (string.Equals(mod.Metadata.Id, excludingModId, StringComparison.Ordinal)
                 || mod.Manifest is not { } manifest)
             {

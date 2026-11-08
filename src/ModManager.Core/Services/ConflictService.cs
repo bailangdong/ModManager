@@ -185,17 +185,7 @@ public sealed class ConflictService : IConflictService
     /// <summary>True when a staged relative path is excluded from deployment.</summary>
     /// <param name="relativePath">Relative path.</param>
     private static bool IsExcluded(string relativePath)
-    {
-        foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (segment.StartsWith('.') || segment.Equals("Thumbs.db", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => DeploymentPlanner.IsExcluded(relativePath);
 
     /// <summary>Reads a file size, tolerating failure.</summary>
     /// <param name="path">File to stat.</param>

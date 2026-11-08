@@ -133,7 +133,27 @@ public sealed record FileConflict(
     IReadOnlyList<string> OverriddenModIds,
     ConflictResolutionKind Resolution,
     bool IsBlocking,
-    string Reason);
+    string Reason)
+{
+    /// <summary>Absolute canonical target, so two relative-looking paths cannot be mistaken for each other.</summary>
+    public string? AbsoluteTarget { get; init; }
+
+    /// <summary>Every mod that claimed this path, in load order, with its source and resolution evidence.</summary>
+    public IReadOnlyList<FileConflictProvider> Providers { get; init; } = [];
+}
+
+/// <summary>One claimant of a contested file, kept so the UI can explain where each version came from.</summary>
+/// <param name="ModId">Claiming mod.</param>
+/// <param name="SourcePath">Absolute staged source.</param>
+/// <param name="BaseRoot">Root that produced the target.</param>
+/// <param name="Evidence">Why this target was chosen.</param>
+/// <param name="IsWinner">True for the version that currently wins.</param>
+public sealed record FileConflictProvider(
+    string ModId,
+    string SourcePath,
+    string BaseRoot,
+    string Evidence,
+    bool IsWinner);
 
 /// <summary>
 /// One file the planner intends to touch, with the evidence needed to justify it.

@@ -295,6 +295,7 @@ public sealed class ModInstallService : IModInstallService
         // benefit of a pure planner: the preview is not an estimate of the install, it IS the plan,
         // rendered. There is no second code path that can disagree with what happens next.
         var plan = _planner.BuildPreviewPlan(adapter.Definition, installPath, staged.Metadata, existingMods);
+        deploymentRoot = plan.DeploymentRoot;
 
         var entries = new List<PreviewEntry>();
         var rejections = new List<string>();

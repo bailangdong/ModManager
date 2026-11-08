@@ -315,6 +315,153 @@ public sealed class InstallPipelineTests
         Assert.Contains(result.Warnings, w => w.Contains("kept", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// B overwrites A, which overwrote the vanilla file. Removing B must restore A exactly, and
+    /// removing A must then restore the vanilla bytes. A single displaced-owner link is not enough:
+    /// the backup must survive B's uninstall so A's own uninstall can still find it.
+    /// </summary>
+    [Fact]
+    public async Task OverwriteChainRestoresPreviousModThenOriginalGameFile()
+    {
+        var (host, gameRoot) = NewEnvironment();
+        using var _ = host;
+
+        var target = Path.Combine(gameRoot, "Mods", "plugins", "chain.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.WriteAllText(target, "vanilla bytes");
+
+        var archiveA = TestArchives.CreateZip(host.Tree, "chain-a.zip", ("Mods/plugins/chain.dll", "mod A bytes"));
+        var stagedA = await StageAsync(host, archiveA);
+        var installA = await InstallAsync(host, gameRoot, stagedA);
+        Assert.True(installA.Succeeded, installA.Error);
+        Assert.Equal("mod A bytes", File.ReadAllText(target));
+
+        var archiveB = TestArchives.CreateZip(host.Tree, "chain-b.zip", ("Mods/plugins/chain.dll", "mod B bytes"));
+        var stagedB = await StageAsync(host, archiveB);
+        var installB = await InstallAsync(host, gameRoot, stagedB);
+        Assert.True(installB.Succeeded, installB.Error);
+        Assert.Equal("mod B bytes", File.ReadAllText(target));
+
+        var manifestB = host.Library.GetManifest(GameId, stagedB.Metadata.Id);
+        Assert.NotNull(manifestB);
+        var deployedByB = Assert.Single(manifestB!.Files);
+        Assert.Equal(stagedA.Metadata.Id, deployedByB.DisplacedModId);
+
+        var uninstallB = await host.Install.UninstallAsync(
+            GameId,
+            stagedB.Metadata.Id,
+            new TestGameAdapter(),
+            gameRoot,
+            deleteModifiedFiles: false,
+            host.Logger);
+        Assert.True(uninstallB.Succeeded, uninstallB.Error);
+        Assert.Equal("mod A bytes", File.ReadAllText(target));
+
+        var uninstallA = await host.Install.UninstallAsync(
+            GameId,
+            stagedA.Metadata.Id,
+            new TestGameAdapter(),
+            gameRoot,
+            deleteModifiedFiles: false,
+            host.Logger);
+        Assert.True(uninstallA.Succeeded, uninstallA.Error);
+        Assert.Equal("vanilla bytes", File.ReadAllText(target));
+    }
+
+    /// <summary>
+    /// A three-deep overwrite chain must unwind one layer at a time. Each manifest keeps the owner it
+    /// displaced, and that owner's own manifest still points at the layer beneath it.
+    /// </summary>
+    [Fact]
+    public async Task ThreeModOverwriteChainRestoresEachPreviousLayerThenVanilla()
+    {
+        var (host, gameRoot) = NewEnvironment();
+        using var _ = host;
+
+        var target = Path.Combine(gameRoot, "Mods", "plugins", "chain.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.WriteAllText(target, "vanilla bytes");
+
+        var archives = new[]
+        {
+            TestArchives.CreateZip(host.Tree, "three-a.zip", ("Mods/plugins/chain.dll", "A bytes")),
+            TestArchives.CreateZip(host.Tree, "three-b.zip", ("Mods/plugins/chain.dll", "B bytes")),
+            TestArchives.CreateZip(host.Tree, "three-c.zip", ("Mods/plugins/chain.dll", "C bytes")),
+        };
+
+        var installed = new List<StagedMod>();
+        foreach (var archive in archives)
+        {
+            var staged = await StageAsync(host, archive);
+            var install = await InstallAsync(host, gameRoot, staged);
+            Assert.True(install.Succeeded, install.Error);
+            installed.Add(staged);
+        }
+
+        Assert.Equal("C bytes", File.ReadAllText(target));
+
+        var bManifest = host.Library.GetManifest(GameId, installed[1].Metadata.Id);
+        var cManifest = host.Library.GetManifest(GameId, installed[2].Metadata.Id);
+        Assert.Equal(installed[0].Metadata.Id, bManifest!.Files.Single().DisplacedModId);
+        Assert.Equal(installed[1].Metadata.Id, cManifest!.Files.Single().DisplacedModId);
+
+        foreach (var (staged, expected) in new[]
+                 {
+                     (installed[2], "B bytes"),
+                     (installed[1], "A bytes"),
+                     (installed[0], "vanilla bytes"),
+                 })
+        {
+            var uninstall = await host.Install.UninstallAsync(
+                GameId,
+                staged.Metadata.Id,
+                new TestGameAdapter(),
+                gameRoot,
+                deleteModifiedFiles: false,
+                host.Logger);
+            Assert.True(uninstall.Succeeded, uninstall.Error);
+            Assert.Equal(expected, File.ReadAllText(target));
+        }
+    }
+
+    /// <summary>
+    /// If the backup disappeared, uninstall must not delete the only remaining copy of the file.
+    /// </summary>
+    [Fact]
+    public async Task UninstallKeepsDeployedFileWhenBackupIsMissing()
+    {
+        var (host, gameRoot) = NewEnvironment();
+        using var _ = host;
+
+        var target = Path.Combine(gameRoot, "Mods", "plugins", "backup-gone.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.WriteAllText(target, "vanilla bytes");
+
+        var archive = TestArchives.CreateZip(host.Tree, "backup-gone.zip", ("Mods/plugins/backup-gone.dll", "mod bytes"));
+        var staged = await StageAsync(host, archive);
+        var install = await InstallAsync(host, gameRoot, staged);
+        Assert.True(install.Succeeded, install.Error);
+
+        var manifest = host.Library.GetManifest(GameId, staged.Metadata.Id);
+        Assert.NotNull(manifest);
+        var deployed = Assert.Single(manifest!.Files);
+        Assert.False(string.IsNullOrEmpty(deployed.BackupPath));
+        File.Delete(deployed.BackupPath!);
+
+        var uninstall = await host.Install.UninstallAsync(
+            GameId,
+            staged.Metadata.Id,
+            new TestGameAdapter(),
+            gameRoot,
+            deleteModifiedFiles: false,
+            host.Logger);
+
+        Assert.True(uninstall.Succeeded, uninstall.Error);
+        Assert.True(File.Exists(target));
+        Assert.Equal("mod bytes", File.ReadAllText(target));
+        Assert.Contains(uninstall.Warnings, warning => warning.Contains("backup", StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Uninstalling only ever removes the files the mod itself deployed.</summary>
     [Fact]
     public async Task UninstallOnlyRemovesFilesTheModDeployed()
