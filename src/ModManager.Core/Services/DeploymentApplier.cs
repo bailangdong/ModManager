@@ -42,22 +42,26 @@ public sealed class DeploymentApplier : IDeploymentApplier
     private readonly JournalService _journals;
     private readonly AppPaths _paths;
     private readonly IModRepository? _modRepository;
+    private readonly IInstallationGate _gate;
 
     /// <summary>Creates the applier.</summary>
     /// <param name="pathSafety">The gate every mutation passes through.</param>
     /// <param name="journals">Transaction journal.</param>
     /// <param name="paths">Application paths, for the backup store.</param>
     /// <param name="modRepository">Optional manifest sink; when absent, manifests are written to disk only.</param>
+    /// <param name="gate">Per-game deployment lock; a default in-process gate is created when omitted.</param>
     public DeploymentApplier(
         IPathSafetyService pathSafety,
         JournalService journals,
         AppPaths paths,
-        IModRepository? modRepository = null)
+        IModRepository? modRepository = null,
+        IInstallationGate? gate = null)
     {
         _pathSafety = pathSafety;
         _journals = journals;
         _paths = paths;
         _modRepository = modRepository;
+        _gate = gate ?? new InstallationGate();
     }
 
     /// <inheritdoc />
@@ -74,6 +78,8 @@ public sealed class DeploymentApplier : IDeploymentApplier
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
+
+        using var lease = await _gate.AcquireAsync(plan.GameId, "apply", cancellationToken).ConfigureAwait(false);
 
         var warnings = new List<string>();
         var journal = _journals.Open(
@@ -367,6 +373,8 @@ public sealed class DeploymentApplier : IDeploymentApplier
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
+
+        using var lease = await _gate.AcquireAsync(manifest.GameId, "undeploy", cancellationToken).ConfigureAwait(false);
 
         var warnings = new List<string>();
         var journal = _journals.Open(manifest.GameId, manifest.ProfileId, "undeploy:" + manifest.ModId, [manifest.ModId]);
@@ -1120,8 +1128,8 @@ public sealed class DeploymentApplier : IDeploymentApplier
             return;
         }
 
-        var failures = _journals.Rollback(journal, logger);
-        if (failures.Count == 0)
+        var rollback = _journals.RollbackDetailed(journal, logger);
+        if (rollback.Failures.Count == 0 && rollback.Deferred.Count == 0)
         {
             logger.Info("Deploy", $"已回滚事务 {journal.TransactionId}。");
             _journals.Transition(journal, JournalState.RolledBack);
@@ -1130,11 +1138,11 @@ public sealed class DeploymentApplier : IDeploymentApplier
         else
         {
             // Leaving the journal in place is deliberate: it is the only record of what is half-done,
-            // and startup recovery will try again.
+            // and startup recovery will try again or ask the user to decide.
             logger.Error(
                 "Deploy",
-                $"事务 {journal.TransactionId} 的回滚未完成，下次启动时会再次尝试恢复。",
-                string.Join("; ", failures));
+                $"事务 {journal.TransactionId} 的回滚未完成，下次启动时会再次尝试恢复或要求人工处理。",
+                string.Join("; ", rollback.Failures.Concat(rollback.Deferred)));
         }
 
         await Task.CompletedTask.ConfigureAwait(false);

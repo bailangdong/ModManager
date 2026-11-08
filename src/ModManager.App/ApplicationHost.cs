@@ -218,8 +218,8 @@ public sealed class ApplicationHost
         var archives = new ArchiveReader();
         var analyzer = new ModAnalyzer();
 
-        var applier = new DeploymentApplier(pathSafety, journals, paths, library);
-
+        var gate = new InstallationGate();
+        var applier = new DeploymentApplier(pathSafety, journals, paths, library, gate);
         var install = new ModInstallService(
             paths,
             archives,
@@ -236,7 +236,7 @@ public sealed class ApplicationHost
 
         var packages = new PackageLibrary(paths, logger);
         var installMethods = new InstallMethodDetector();
-        var loaders = new LoaderInstaller(paths, archives);
+        var loaders = new LoaderInstaller(paths, archives, gate);
         var packageInstall = new PackageInstallService(
             packages,
             library,

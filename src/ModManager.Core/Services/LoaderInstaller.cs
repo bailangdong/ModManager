@@ -25,12 +25,14 @@ public sealed class LoaderInstaller : ILoaderInstaller
 
     private readonly AppPaths _paths;
     private readonly IArchiveReader _archives;
+    private readonly IInstallationGate _gate;
 
     /// <summary>Creates the installer.</summary>
-    public LoaderInstaller(AppPaths paths, IArchiveReader archives)
+    public LoaderInstaller(AppPaths paths, IArchiveReader archives, IInstallationGate? gate = null)
     {
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _archives = archives ?? throw new ArgumentNullException(nameof(archives));
+        _gate = gate ?? new InstallationGate();
     }
 
     /// <inheritdoc />
@@ -88,6 +90,9 @@ public sealed class LoaderInstaller : ILoaderInstaller
         }
 
         var selectedPaths = selected.Select(pair => pair.Entry.Path).ToList();
+
+        using var lease = await _gate.AcquireAsync(adapter.GameId, "loader-install", cancellationToken)
+            .ConfigureAwait(false);
 
         var staging = Path.Combine(_paths.Mods, "_loader", Guid.NewGuid().ToString("N"));
         var backup = Path.Combine(

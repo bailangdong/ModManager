@@ -65,11 +65,59 @@ public sealed class JournalRecoveryTests
         var target = tree.WriteFile("game/Mods/original.dll", "our replacement");
         var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
 
+        // Real transactions record the placement too; that is the proof that the bytes currently on
+        // disk are ours and may be replaced by the backup during rollback.
         journals.RecordUndo(journal, new RestoreOverwrittenFileUndo(target, backup, FileSystemOps.HashFile(backup)));
+        journals.RecordUndo(journal, new RemovePlacedFileUndo(target, FileSystemOps.HashFile(target), "mod-1"));
         var failures = journals.Rollback(journal, logger);
 
         Assert.Empty(failures);
         Assert.Equal("original bytes", File.ReadAllText(target));
+    }
+
+    /// <summary>
+    /// A target edited after deployment must not be replaced by its backup during rollback.
+    /// </summary>
+    [Fact]
+    public void RollbackKeepsAnOverwrittenFileTheUserEditedAfterDeployment()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out var logger);
+        var backup = tree.WriteFile("appdata/Backups/original.dll", "original bytes");
+        var target = tree.WriteFile("game/Mods/original.dll", "our replacement");
+        var deployed = FileSystemOps.HashFile(target);
+        tree.WriteFile("game/Mods/original.dll", "the user's edit");
+
+        var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
+        journals.RecordUndo(journal, new RestoreOverwrittenFileUndo(target, backup, FileSystemOps.HashFile(backup)));
+        journals.RecordUndo(journal, new RemovePlacedFileUndo(target, deployed, "mod-1"));
+
+        var result = journals.RollbackDetailed(journal, logger);
+
+        Assert.Empty(result.Failures);
+        Assert.NotEmpty(result.Deferred);
+        Assert.Equal("the user's edit", File.ReadAllText(target));
+    }
+
+    /// <summary>
+    /// A file that appeared at a deleted path after the crash is not ours to overwrite.
+    /// </summary>
+    [Fact]
+    public void RollbackKeepsAnUnknownFileAtADeletedPath()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out var logger);
+        var staged = tree.WriteFile("appdata/Mods/staged/original.dll", "staged bytes");
+        var target = tree.WriteFile("game/Mods/original.dll", "external file");
+
+        var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
+        journals.RecordUndo(journal, new RestoreDeletedFileUndo(target, staged));
+
+        var result = journals.RollbackDetailed(journal, logger);
+
+        Assert.Empty(result.Failures);
+        Assert.NotEmpty(result.Deferred);
+        Assert.Equal("external file", File.ReadAllText(target));
     }
 
     /// <summary>A deleted game file is recreated from staging.</summary>
@@ -173,6 +221,96 @@ public sealed class JournalRecoveryTests
         journals.Transition(journal, JournalState.Committed);
 
         Assert.Empty(journals.FindInterrupted());
+    }
+
+    /// <summary>
+    /// Recovery must leave a user-edited overwrite target alone and ask for review, not silently
+    /// restore the old backup over it.
+    /// </summary>
+    [Fact]
+    public async Task RecoveryDefersWhenTheOverwrittenFileWasEditedAfterDeployment()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out var logger);
+        var backup = tree.WriteFile("appdata/Backups/original.dll", "original bytes");
+        var target = tree.WriteFile("game/Mods/original.dll", "our replacement");
+        var deployed = FileSystemOps.HashFile(target);
+        tree.WriteFile("game/Mods/original.dll", "the user's edit");
+
+        var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
+        journals.RecordUndo(journal, new RestoreOverwrittenFileUndo(target, backup, FileSystemOps.HashFile(backup)));
+        journals.RecordUndo(journal, new RemovePlacedFileUndo(target, deployed, "mod-1"));
+        journals.Transition(journal, JournalState.Applying);
+
+        var report = await journals.RecoverAsync(logger);
+
+        Assert.Contains(journal.TransactionId, report.Deferred);
+        Assert.Empty(report.Failed);
+        Assert.Equal("the user's edit", File.ReadAllText(target));
+        Assert.Single(journals.FindInterrupted());
+    }
+
+    /// <summary>A corrupt backup must be reported before it is copied over a deployed file.</summary>
+    [Fact]
+    public void RollbackRefusesACorruptBackup()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out var logger);
+        var backup = tree.WriteFile("appdata/Backups/original.dll", "original bytes");
+        var target = tree.WriteFile("game/Mods/original.dll", "our replacement");
+        var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
+
+        journals.RecordUndo(journal, new RemovePlacedFileUndo(target, FileSystemOps.HashFile(target), "mod-1"));
+        journals.RecordUndo(journal, new RestoreOverwrittenFileUndo(target, backup, FileSystemOps.HashFile(backup)));
+        tree.WriteFile("appdata/Backups/original.dll", "corrupted backup");
+
+        var result = journals.RollbackDetailed(journal, logger);
+
+        Assert.Contains(result.Failures, failure => failure.Contains("hash mismatch", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("our replacement", File.ReadAllText(target));
+    }
+
+    /// <summary>A missing backup is a hard failure, but the deployed file is kept for manual repair.</summary>
+    [Fact]
+    public void RollbackReportsAMissingBackupAndKeepsTheDeployedFile()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out var logger);
+        var target = tree.WriteFile("game/Mods/original.dll", "our replacement");
+        var missingBackup = tree.Dir("appdata/Backups") + "/does-not-exist.dll";
+        var journal = journals.Open("testgame", "default", "plan-hash", ["mod-1"]);
+
+        journals.RecordUndo(journal, new RemovePlacedFileUndo(target, FileSystemOps.HashFile(target), "mod-1"));
+        journals.RecordUndo(journal, new RestoreOverwrittenFileUndo(target, missingBackup, "original-hash"));
+
+        var result = journals.RollbackDetailed(journal, logger);
+
+        Assert.Contains(result.Failures, failure => failure.Contains("backup missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("our replacement", File.ReadAllText(target));
+    }
+
+    /// <summary>Inspection is read-only and exposes both interrupted and committed transactions.</summary>
+    [Fact]
+    public void InspectDistinguishesInterruptedAndCommittedTransactions()
+    {
+        using var tree = new TemporaryTree();
+        var journals = NewJournals(tree, out _);
+        var interrupted = journals.Open("testgame", "default", "plan-1", ["mod-1"]);
+        journals.Transition(interrupted, JournalState.Applying);
+
+        var committed = journals.Open("testgame", "default", "plan-2", ["mod-2"]);
+        journals.WriteCommit(committed, NewManifest());
+        journals.Transition(committed, JournalState.Applying);
+
+        var snapshot = journals.Inspect();
+
+        var interruptedRow = Assert.Single(snapshot, row => row.TransactionId == interrupted.TransactionId);
+        Assert.True(interruptedRow.Interrupted);
+        Assert.False(interruptedRow.HasCommitMarker);
+
+        var committedRow = Assert.Single(snapshot, row => row.TransactionId == committed.TransactionId);
+        Assert.True(committedRow.HasCommitMarker);
+        Assert.Equal(JournalState.Applying, committedRow.State);
     }
 
     private static JournalService NewJournals(TemporaryTree tree, out AppLogger logger)

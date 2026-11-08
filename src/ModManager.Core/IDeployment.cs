@@ -157,6 +157,12 @@ public interface IJournalService
     IReadOnlyList<DeploymentJournal> FindInterrupted();
 
     /// <summary>
+    /// Reads journals and reports completed, interrupted and committed transactions without changing
+    /// anything on disk. Use this before deciding whether recovery needs user attention.
+    /// </summary>
+    IReadOnlyList<JournalInspection> Inspect();
+
+    /// <summary>
     /// Repairs every interrupted transaction: replays undo actions in reverse, verifies the result,
     /// and reports what happened. Called once at startup, before the UI enables anything.
     /// </summary>

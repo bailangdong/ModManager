@@ -176,6 +176,28 @@ public sealed class JournalService : IJournalService
         return journals;
     }
 
+    /// <summary>
+    /// Reads every journal and reports whether it is complete, interrupted, or already committed.
+    /// This never mutates the journal or the game folder; it is the inspection step before recovery.
+    /// </summary>
+    public IReadOnlyList<JournalInspection> Inspect()
+    {
+        var markers = LoadCommitMarkers()
+            .Select(marker => marker.TransactionId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return All()
+            .Select(journal => new JournalInspection(
+                journal.TransactionId,
+                journal.GameId,
+                journal.State,
+                markers.Contains(journal.TransactionId),
+                journal.NeedsRecovery,
+                journal.UndoActions.Count,
+                journal.Error))
+            .ToList();
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// Deliberately not <c>async</c>. Every step is a short synchronous file operation (read a marker,
@@ -191,6 +213,7 @@ public sealed class JournalService : IJournalService
 
         var recovered = new List<string>();
         var failed = new List<string>();
+        var deferred = new List<string>();
         var messages = new List<string>();
         var commitMarkers = LoadCommitMarkers();
 
@@ -226,8 +249,8 @@ public sealed class JournalService : IJournalService
                     $"事务 {journal.TransactionId} 在提交点之前被中断，正在回滚。",
                     $"{journal.UndoActions.Count} 项回滚动作");
 
-                var failures = Rollback(journal, logger);
-                if (failures.Count == 0)
+                var rollback = RollbackDetailed(journal, logger);
+                if (rollback.Failures.Count == 0 && rollback.Deferred.Count == 0)
                 {
                     Transition(journal, JournalState.RolledBack);
                     Clear(journal.TransactionId);
@@ -237,11 +260,21 @@ public sealed class JournalService : IJournalService
                 }
                 else
                 {
-                    Transition(journal, JournalState.Failed, string.Join("; ", failures));
-                    failed.Add(journal.TransactionId);
+                    var details = rollback.Failures.Concat(rollback.Deferred).ToList();
+                    if (rollback.Deferred.Count > 0)
+                    {
+                        deferred.Add(journal.TransactionId);
+                    }
+
+                    if (rollback.Failures.Count > 0)
+                    {
+                        failed.Add(journal.TransactionId);
+                    }
+
+                    Transition(journal, JournalState.Failed, string.Join("; ", details));
                     messages.Add(
-                        $"Transaction {journal.TransactionId} could not be fully rolled back and needs attention: "
-                        + string.Join("; ", failures));
+                        $"Transaction {journal.TransactionId} needs attention and was left on disk: "
+                        + string.Join("; ", details));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -275,7 +308,10 @@ public sealed class JournalService : IJournalService
             messages.Add($"A completed transaction ({commit.TransactionId}) was finalised.");
         }
 
-        return Task.FromResult(new JournalRecoveryReport(recovered, failed, messages));
+        return Task.FromResult(new JournalRecoveryReport(recovered, failed, messages)
+        {
+            Deferred = deferred,
+        });
     }
 
     /// <inheritdoc />
@@ -331,12 +367,23 @@ public sealed class JournalService : IJournalService
     /// <param name="journal">Journal to roll back.</param>
     /// <param name="logger">Logger.</param>
     /// <returns>The list of actions that could not be undone.</returns>
-    public List<string> Rollback(DeploymentJournal journal, IAppLogger logger)
+    public List<string> Rollback(DeploymentJournal journal, IAppLogger logger) =>
+        RollbackDetailed(journal, logger).Failures.ToList();
+
+    /// <summary>
+    /// Replays every undo action in reverse order and separates hard failures from actions that were
+    /// deliberately skipped because the file no longer belongs to this transaction.
+    /// </summary>
+    /// <param name="journal">Journal to roll back.</param>
+    /// <param name="logger">Logger.</param>
+    public JournalRollbackResult RollbackDetailed(DeploymentJournal journal, IAppLogger logger)
     {
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(logger);
 
         var failures = new List<string>();
+        var deferred = new List<string>();
+        var blockedDeletes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         Transition(journal, JournalState.Applying, journal.Error);
         Append(journal, JournalStepKind.RollbackBegin, null, $"{journal.UndoActions.Count} action(s) to reverse");
@@ -351,6 +398,17 @@ public sealed class JournalService : IJournalService
                 switch (action)
                 {
                     case RemovePlacedFileUndo remove:
+                        // If the restore of the file this placement replaced failed, deleting the
+                        // placement would leave neither the mod file nor the original on disk.
+                        if (blockedDeletes.Contains(remove.Path))
+                        {
+                            logger.Warn(
+                                "Journal",
+                                $"回滚时暂不删除 “{remove.Path}”：它的原文件恢复失败，保留现有文件以便人工处理。");
+                            deferred.Add($"kept {remove.Path} after a failed restore");
+                            break;
+                        }
+
                         // Only remove the file if it is still byte-identical to what we placed. If the
                         // user edited it in the meantime, deleting it would destroy their work — the
                         // "no silent clobber" invariant.
@@ -360,6 +418,7 @@ public sealed class JournalService : IJournalService
                             logger.Warn(
                                 "Journal",
                                 $"回滚时不删除 “{remove.Path}”：它在部署后被改动过。");
+                            deferred.Add($"kept changed file {remove.Path}");
                             break;
                         }
 
@@ -367,27 +426,72 @@ public sealed class JournalService : IJournalService
                         break;
 
                     case RestoreOverwrittenFileUndo restore:
-                        if (File.Exists(FileSystemOps.ToExtendedPath(restore.BackupPath)))
-                        {
-                            FileSystemOps.CopyAsync(restore.BackupPath, restore.Path).GetAwaiter().GetResult();
-                        }
-                        else
+                        if (!FileSystemOps.ExistsNoFollow(restore.BackupPath))
                         {
                             failures.Add($"backup missing for {restore.Path} ({restore.BackupPath})");
+                            blockedDeletes.Add(restore.Path);
+                            break;
+                        }
+
+                        if (!HashMatches(restore.BackupPath, restore.OriginalSha256))
+                        {
+                            failures.Add($"backup hash mismatch for {restore.Path} ({restore.BackupPath})");
+                            blockedDeletes.Add(restore.Path);
+                            break;
+                        }
+
+                        // The target may be the file we placed, the original bytes (already restored),
+                        // a user edit, or an unrelated external file. Only restore when we can prove it
+                        // is still the file this transaction wrote; otherwise keep it and defer.
+                        if (FileSystemOps.ExistsNoFollow(restore.Path))
+                        {
+                            if (HashMatches(restore.Path, restore.OriginalSha256))
+                            {
+                                break;
+                            }
+
+                            var placed = journal.UndoActions
+                                .OfType<RemovePlacedFileUndo>()
+                                .FirstOrDefault(candidate =>
+                                    string.Equals(candidate.Path, restore.Path, StringComparison.OrdinalIgnoreCase));
+
+                            if (placed is null || !HashMatches(restore.Path, placed.DeployedSha256))
+                            {
+                                logger.Warn(
+                                    "Journal",
+                                    $"回滚时不覆盖 “{restore.Path}”：它已不再是本次事务写入的内容。");
+                                deferred.Add($"kept unknown file {restore.Path}");
+                                break;
+                            }
+                        }
+
+                        FileSystemOps.CopyAsync(restore.BackupPath, restore.Path).GetAwaiter().GetResult();
+                        if (!HashMatches(restore.Path, restore.OriginalSha256))
+                        {
+                            failures.Add($"restored bytes do not match the backup hash for {restore.Path}");
                         }
 
                         break;
 
                     case RestoreDeletedFileUndo deleted:
-                        if (File.Exists(FileSystemOps.ToExtendedPath(deleted.SourcePath)))
-                        {
-                            FileSystemOps.CopyAsync(deleted.SourcePath, deleted.Path).GetAwaiter().GetResult();
-                        }
-                        else
+                        if (!File.Exists(FileSystemOps.ToExtendedPath(deleted.SourcePath)))
                         {
                             failures.Add($"staged source missing for {deleted.Path} ({deleted.SourcePath})");
+                            break;
                         }
 
+                        // A file that already exists is not ours to replace: it may be a user file or
+                        // something another program created after the deletion.
+                        if (FileSystemOps.ExistsNoFollow(deleted.Path))
+                        {
+                            logger.Warn(
+                                "Journal",
+                                $"回滚时不覆盖 “{deleted.Path}”：目标位置已有不属于本次事务的文件。");
+                            deferred.Add($"kept existing file {deleted.Path}");
+                            break;
+                        }
+
+                        FileSystemOps.CopyAsync(deleted.SourcePath, deleted.Path).GetAwaiter().GetResult();
                         break;
 
                     case RemoveDirectoryUndo directory:
@@ -418,8 +522,12 @@ public sealed class JournalService : IJournalService
             }
         }
 
-        Append(journal, JournalStepKind.RollbackComplete, null, $"{failures.Count} failure(s)");
-        return failures;
+        Append(
+            journal,
+            JournalStepKind.RollbackComplete,
+            null,
+            $"{failures.Count} failure(s), {deferred.Count} deferred");
+        return new JournalRollbackResult(failures, deferred);
     }
 
     /// <summary>Deletes a journal and its commit marker.</summary>

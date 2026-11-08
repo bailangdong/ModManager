@@ -197,6 +197,34 @@ public sealed record RemoveDirectoryUndo : UndoAction
 }
 
 /// <summary>
+/// Outcome of replaying a journal's undo log.
+/// </summary>
+/// <param name="Failures">Actions that could not be completed and need attention.</param>
+/// <param name="Deferred">Actions deliberately skipped because the file no longer belongs to this transaction.</param>
+public sealed record JournalRollbackResult(
+    IReadOnlyList<string> Failures,
+    IReadOnlyList<string> Deferred);
+
+/// <summary>
+/// A read-only snapshot of one journal, used to reconcile a previous run with what is on disk.
+/// </summary>
+/// <param name="TransactionId">Transaction id.</param>
+/// <param name="GameId">Game the transaction targets.</param>
+/// <param name="State">Last recorded state.</param>
+/// <param name="HasCommitMarker">Whether the irreversible commit marker is present.</param>
+/// <param name="Interrupted">Whether this transaction still needs recovery or review.</param>
+/// <param name="UndoActionCount">Number of reversal steps recorded.</param>
+/// <param name="Error">Last recorded error, if any.</param>
+public sealed record JournalInspection(
+    string TransactionId,
+    string GameId,
+    JournalState State,
+    bool HasCommitMarker,
+    bool Interrupted,
+    int UndoActionCount,
+    string? Error);
+
+/// <summary>
 /// What happened when we inspected journals left behind by a previous run.
 /// </summary>
 /// <param name="Recovered">Transactions rolled back successfully.</param>
@@ -210,8 +238,14 @@ public sealed record JournalRecoveryReport(
     /// <summary>An empty report, used when there was nothing to do.</summary>
     public static JournalRecoveryReport Empty { get; } = new([], [], []);
 
+    /// <summary>
+    /// Transactions left on disk because a file could not be proven to belong to the transaction.
+    /// These are deliberately not repaired automatically; the user must inspect them.
+    /// </summary>
+    public IReadOnlyList<string> Deferred { get; init; } = [];
+
     /// <summary>True when at least one transaction needed attention.</summary>
-    public bool HadWork => Recovered.Count > 0 || Failed.Count > 0;
+    public bool HadWork => Recovered.Count > 0 || Failed.Count > 0 || Deferred.Count > 0;
 }
 
 /// <summary>Progress of a deployment, reported incrementally so the UI can stay responsive.</summary>
