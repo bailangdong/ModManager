@@ -48,6 +48,8 @@
     -->
     <ProjectReference Include="..\..\src\ModManager.Core\ModManager.Core.csproj" />
     <ProjectReference Include="..\..\src\ModManager.App\ModManager.App.csproj" />
+    <!-- Test-only child process used to prove the cross-process named mutex. -->
+    <ProjectReference Include="..\ModManager.LockProbe\ModManager.LockProbe.csproj" />
   </ItemGroup>
 
   <ItemGroup>

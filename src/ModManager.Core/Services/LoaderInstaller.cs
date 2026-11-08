@@ -91,7 +91,7 @@ public sealed class LoaderInstaller : ILoaderInstaller
 
         var selectedPaths = selected.Select(pair => pair.Entry.Path).ToList();
 
-        using var lease = await _gate.AcquireAsync(adapter.GameId, "loader-install", cancellationToken)
+        using var lease = await _gate.AcquireAsync(installPath, "loader-install", cancellationToken)
             .ConfigureAwait(false);
 
         var staging = Path.Combine(_paths.Mods, "_loader", Guid.NewGuid().ToString("N"));

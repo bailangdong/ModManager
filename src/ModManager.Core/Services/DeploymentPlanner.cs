@@ -73,7 +73,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         ApplyOverrides(resolved, overrides, deploymentRoot, definition, installPath, warnings);
         var conflicts = BuildConflicts(resolved, overrides, deploymentRoot);
 
-        return BuildOperations(definition, profile, deploymentRoot, enabled, mods, resolved, conflicts, warnings);
+        return BuildOperations(definition, profile, deploymentRoot, Path.GetFullPath(installPath), enabled, mods, resolved, conflicts, warnings);
     }
 
     /// <inheritdoc />
@@ -134,6 +134,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
             GameId = definition.Id,
             ProfileId = "preview",
             DeploymentRoot = deploymentRoot,
+            GameRoot = Path.GetFullPath(installPath),
             Files = files,
             Operations = operations,
             Conflicts = previewConflicts,
@@ -518,6 +519,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
         GameDefinition definition,
         Profile profile,
         string deploymentRoot,
+        string gameRoot,
         IReadOnlyList<ModSetEntry> enabled,
         IReadOnlyList<ModSetEntry> allMods,
         ResolutionResult resolved,
@@ -678,6 +680,7 @@ public sealed class DeploymentPlanner : IDeploymentPlanner
             GameId = definition.Id,
             ProfileId = profile.Id,
             DeploymentRoot = deploymentRoot,
+            GameRoot = gameRoot,
             Files = files,
             Operations = operations,
             Conflicts = conflicts,

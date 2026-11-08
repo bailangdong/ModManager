@@ -79,7 +79,10 @@ public sealed class DeploymentApplier : IDeploymentApplier
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
 
-        using var lease = await _gate.AcquireAsync(plan.GameId, "apply", cancellationToken).ConfigureAwait(false);
+        using var lease = await _gate.AcquireAsync(
+            string.IsNullOrWhiteSpace(plan.GameRoot) ? plan.DeploymentRoot : plan.GameRoot,
+            "apply",
+            cancellationToken).ConfigureAwait(false);
 
         var warnings = new List<string>();
         var journal = _journals.Open(
@@ -374,7 +377,10 @@ public sealed class DeploymentApplier : IDeploymentApplier
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(logger);
 
-        using var lease = await _gate.AcquireAsync(manifest.GameId, "undeploy", cancellationToken).ConfigureAwait(false);
+        using var lease = await _gate.AcquireAsync(
+            string.IsNullOrWhiteSpace(manifest.GameRoot) ? manifest.DeploymentRoot : manifest.GameRoot,
+            "undeploy",
+            cancellationToken).ConfigureAwait(false);
 
         var warnings = new List<string>();
         var journal = _journals.Open(manifest.GameId, manifest.ProfileId, "undeploy:" + manifest.ModId, [manifest.ModId]);
@@ -795,6 +801,7 @@ public sealed class DeploymentApplier : IDeploymentApplier
             GameId = plan.GameId,
             ProfileId = plan.ProfileId,
             DeploymentRoot = plan.DeploymentRoot,
+            GameRoot = plan.GameRoot,
             Files = deployed,
             Conflicts = conflicts,
             DeploymentMethod = used.Count > 0 ? string.Join(", ", used) : "none",

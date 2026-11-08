@@ -189,6 +189,12 @@ public sealed record DeploymentPlan
     /// <summary>Absolute, canonical deployment root (the game's Mod Root).</summary>
     public required string DeploymentRoot { get; init; }
 
+    /// <summary>
+    /// Game install root used for the deployment lock. Optional for older/constructed plans; when
+    /// absent the applier falls back to <see cref="DeploymentRoot"/>.
+    /// </summary>
+    public string? GameRoot { get; init; }
+
     /// <summary>Every file the plan will place, in deterministic order.</summary>
     public required IReadOnlyList<PlannedFile> Files { get; init; }
 

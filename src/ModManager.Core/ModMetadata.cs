@@ -205,6 +205,12 @@ public sealed record ModManifest
     /// <summary>Absolute deployment root the relative paths are anchored to.</summary>
     public required string DeploymentRoot { get; init; }
 
+    /// <summary>
+    /// Game install root used for the deployment lock. Optional; old manifests fall back to
+    /// <see cref="DeploymentRoot"/>.
+    /// </summary>
+    public string? GameRoot { get; init; }
+
     /// <summary>When it was deployed.</summary>
     public DateTimeOffset InstalledAt { get; init; } = DateTimeOffset.UtcNow;
 
