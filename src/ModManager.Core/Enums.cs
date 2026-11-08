@@ -80,6 +80,9 @@ public enum JournalState
 
     /// <summary>Reached a state we could not repair automatically. Requires user attention.</summary>
     Failed = 5,
+
+    /// <summary>The user explicitly confirmed a deferred transaction is resolved; never auto-cleared.</summary>
+    Resolved = 6,
 }
 
 /// <summary>Kind of journal entry, used for forensics and for choosing the recovery action.</summary>

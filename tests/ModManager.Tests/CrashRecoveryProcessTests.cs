@@ -66,6 +66,57 @@ public sealed class CrashRecoveryProcessTests
         Assert.Single(host.Journals.FindInterrupted());
     }
 
+    [Theory]
+    [InlineData("JournalOpened")]
+    [InlineData("FirstFilePlaced")]
+    [InlineData("AllFilesPlaced")]
+    [InlineData("BeforeCommit")]
+    public async Task RealApplierKilledAtCheckpointRecoversToThePreTransactionState(string checkpoint)
+    {
+        using var tree = new TemporaryTree();
+        await RunApplierCrashAsync(tree, checkpoint);
+
+        var plugin = Path.Combine(tree.Root, "game", "BepInEx", "plugins", "Example.dll");
+        var config = Path.Combine(tree.Root, "game", "BepInEx", "config", "Example.json");
+
+        using var host = TestHost.Create(tree);
+        var report = await host.Journals.RecoverAsync(host.Logger);
+
+        Assert.NotEmpty(report.Recovered);
+        Assert.Equal("ORIGINAL", await File.ReadAllTextAsync(plugin));
+        Assert.False(File.Exists(config), "A partially placed target must not survive rollback.");
+        Assert.Empty(host.Journals.FindInterrupted());
+    }
+
+    private static async Task RunApplierCrashAsync(TemporaryTree tree, string checkpoint)
+    {
+        var probeDll = Path.Combine(AppContext.BaseDirectory, "ModManager.LockProbe.dll");
+        Assert.True(File.Exists(probeDll), $"The applier probe was not copied to '{probeDll}'.");
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add(probeDll);
+        startInfo.ArgumentList.Add("apply");
+        startInfo.ArgumentList.Add(tree.Dir("appdata"));
+        startInfo.ArgumentList.Add(tree.Dir("game"));
+        startInfo.ArgumentList.Add(checkpoint);
+
+        using var child = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start the applier probe.");
+
+        var line = await child.StandardOutput.ReadLineAsync()
+            .WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal($"CHECKPOINT:{checkpoint}", line);
+
+        child.Kill(entireProcessTree: true);
+        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
     private static async Task RunCrashAsync(TemporaryTree tree, string mode)
     {
         var probeDll = Path.Combine(AppContext.BaseDirectory, "ModManager.LockProbe.dll");

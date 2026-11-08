@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using ModManager.Core;
+using ModManager.Core.Persistence;
+using ModManager.Core.Safety;
 using ModManager.Core.Services;
 
 // Test-only child process. It either holds the cross-process lock for a directory or writes a
@@ -36,6 +38,10 @@ switch (args[0])
     case "crash-overwrite" when args.Length >= 3:
         CrashOverwrite(args[1], args[2]);
         return 42;
+
+    case "apply" when args.Length >= 4:
+        await ApplyUntilCheckpoint(args[1], args[2], args[3]);
+        return 0;
 
     default:
         Console.Error.WriteLine("unknown command");
@@ -92,6 +98,75 @@ static void CrashOverwrite(string appData, string gameRoot)
     Environment.Exit(42);
 }
 
+/// <summary>
+/// Runs the real <see cref="DeploymentApplier"/> over a multi-target BepInEx-like mod and blocks at
+/// one checkpoint. The parent test kills this process while it is blocked; no finally/Dispose runs.
+/// </summary>
+static async Task ApplyUntilCheckpoint(string appData, string gameRoot, string checkpointName)
+{
+    var paths = OpenPaths(appData);
+    var logger = new AppLogger();
+    var settings = new AppSettings();
+    var safety = new PathSafetyService(paths, settings.Safety, logger);
+    var library = new LibraryRepository(new JsonDocumentStore(paths), paths);
+    var journals = new JournalService(paths, logger);
+    var planner = new DeploymentPlanner(safety, logger);
+    var applier = new DeploymentApplier(safety, journals, paths, library, new InstallationGate(crossProcess: false));
+
+    var modRoot = Path.Combine(gameRoot, "BepInEx");
+    Directory.CreateDirectory(Path.Combine(modRoot, "plugins"));
+    Directory.CreateDirectory(Path.Combine(modRoot, "config"));
+    File.WriteAllText(Path.Combine(modRoot, "plugins", "Example.dll"), "ORIGINAL");
+    safety.ApproveGameRoot("probe-game", gameRoot, modRoot);
+
+    var staging = Path.Combine(appData, "staging");
+    Directory.CreateDirectory(Path.Combine(staging, "plugins"));
+    Directory.CreateDirectory(Path.Combine(staging, "config"));
+    File.WriteAllText(Path.Combine(staging, "plugins", "Example.dll"), "MODDED");
+    File.WriteAllText(Path.Combine(staging, "config", "Example.json"), "{}");
+
+    var definition = new GameDefinition
+    {
+        Id = "probe-game",
+        Name = "Probe",
+        ModRoot = "BepInEx",
+        InstallTargets =
+        [
+            new("plugins", "BepInEx/plugins"),
+            new("config", "BepInEx/config"),
+        ],
+    };
+    var mod = new ModMetadata
+    {
+        Id = "probe-mod",
+        Name = "Probe Mod",
+        GameId = "probe-game",
+        StagingPath = staging,
+    };
+    var profile = new Profile
+    {
+        Id = "probe-profile",
+        Name = "Probe",
+        GameId = "probe-game",
+        ModOrder = ["probe-mod"],
+    };
+    var plan = planner.BuildPlan(definition, gameRoot, profile, [new ModSetEntry(mod, null, staging)], []);
+    var wanted = Enum.Parse<DeploymentCheckpoint>(checkpointName, ignoreCase: true);
+
+    await applier.ApplyAsync(
+        plan,
+        definition,
+        [new ModSetEntry(mod, null, staging)],
+        settings.Deployment,
+        logger,
+        progress: null,
+        cancellationToken: CancellationToken.None,
+        checkpoints: new BlockingCheckpoint(wanted));
+
+    Console.Error.WriteLine($"checkpoint '{checkpointName}' was never reached");
+    Environment.Exit(3);
+}
+
 static AppPaths OpenPaths(string appData)
 {
     var paths = new AppPaths(appData);
@@ -101,3 +176,18 @@ static AppPaths OpenPaths(string appData)
 
 static string Hash(string content) =>
     Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+sealed class BlockingCheckpoint(DeploymentCheckpoint wanted) : IDeploymentCheckpointSink
+{
+    public void Reached(DeploymentCheckpoint checkpoint, string? path)
+    {
+        if (checkpoint != wanted)
+        {
+            return;
+        }
+
+        Console.WriteLine($"CHECKPOINT:{checkpoint}");
+        Console.Out.Flush();
+        Thread.Sleep(TimeSpan.FromSeconds(60));
+    }
+}

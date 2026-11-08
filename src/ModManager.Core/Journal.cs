@@ -76,7 +76,7 @@ public sealed record DeploymentJournal
     public string? Error { get; set; }
 
     /// <summary>True when the transaction ended without needing recovery.</summary>
-    public bool IsTerminal => State is JournalState.Committed or JournalState.RolledBack;
+    public bool IsTerminal => State is JournalState.Committed or JournalState.RolledBack or JournalState.Resolved;
 
     /// <summary>True when the next launch must repair this transaction.</summary>
     public bool NeedsRecovery => !IsTerminal;
@@ -223,6 +223,15 @@ public sealed record JournalInspection(
     bool Interrupted,
     int UndoActionCount,
     string? Error);
+
+/// <summary>Outcome of re-running recovery for one transaction.</summary>
+/// <param name="Recovered">True when the journal reached RolledBack and was cleared.</param>
+/// <param name="Deferred">True when at least one file was left for human review.</param>
+/// <param name="Details">Failure/deferred details.</param>
+public sealed record JournalTransactionRecoveryResult(
+    bool Recovered,
+    bool Deferred,
+    IReadOnlyList<string> Details);
 
 /// <summary>
 /// What happened when we inspected journals left behind by a previous run.

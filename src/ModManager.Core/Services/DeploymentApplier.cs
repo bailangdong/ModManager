@@ -72,7 +72,8 @@ public sealed class DeploymentApplier : IDeploymentApplier
         DeploymentOptions settings,
         IAppLogger logger,
         IProgress<DeployProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IDeploymentCheckpointSink? checkpoints = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(definition);
@@ -110,6 +111,7 @@ public sealed class DeploymentApplier : IDeploymentApplier
         try
         {
             _journals.Transition(journal, JournalState.Applying);
+            checkpoints?.Reached(DeploymentCheckpoint.JournalOpened, plan.DeploymentRoot);
 
             // --- step 1: probe + back up, before anything is mutated ---------------------------
             // Backups are taken here, while the game folder is still pristine. Taking them during the
@@ -251,8 +253,11 @@ public sealed class DeploymentApplier : IDeploymentApplier
                 {
                     warnings.Add($"Refused to write '{write.RelativeTarget}': {check.Reason}");
                     _journals.Append(journal, JournalStepKind.Error, write.TargetPath, check.Reason, succeeded: false);
-                    completed++;
-                    continue;
+
+                    // A refused file is not a warning we can ignore: continuing would commit a plan
+                    // that is only partly deployed and report success. Fail the transaction so the
+                    // files already placed by this run are rolled back by the catch below.
+                    throw new IOException($"Refused to write '{write.RelativeTarget}': {check.Reason}");
                 }
 
                 var (success, method, hash, size) = await PlaceFileAsync(
@@ -295,7 +300,14 @@ public sealed class DeploymentApplier : IDeploymentApplier
 
                 completed++;
                 progress?.Report(new DeployProgress(total, completed, write.RelativeTarget, method, backupCount));
+
+                if (deployed.Count == 1)
+                {
+                    checkpoints?.Reached(DeploymentCheckpoint.FirstFilePlaced, write.TargetPath);
+                }
             }
+
+            checkpoints?.Reached(DeploymentCheckpoint.AllFilesPlaced, plan.DeploymentRoot);
 
             // --- step 3: verify ---------------------------------------------------------------
             if (settings.VerifyAfterDeploy)
@@ -323,6 +335,8 @@ public sealed class DeploymentApplier : IDeploymentApplier
             }
 
             // --- step 4: commit ---------------------------------------------------------------
+            checkpoints?.Reached(DeploymentCheckpoint.BeforeCommit, plan.DeploymentRoot);
+
             var manifest = BuildManifest(plan, definition, methods, deployed, createdDirectories, warnings);
 
             _journals.Transition(journal, JournalState.Applied);

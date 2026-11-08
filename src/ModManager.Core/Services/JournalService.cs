@@ -128,7 +128,7 @@ public sealed class JournalService : IJournalService
         {
             journal.State = state;
             journal.Error = error;
-            if (state is JournalState.Committed or JournalState.RolledBack or JournalState.Failed)
+            if (state is JournalState.Committed or JournalState.RolledBack or JournalState.Failed or JournalState.Resolved)
             {
                 journal.FinishedAt = DateTimeOffset.UtcNow;
             }
@@ -205,11 +205,50 @@ public sealed class JournalService : IJournalService
     /// would only wrap the work in a state machine and invite the reader to assume it yields. The
     /// <see cref="Task{TResult}"/> return type is kept because callers await it from the startup path.
     /// </remarks>
-    public Task<JournalRecoveryReport> RecoverAsync(
+    /// <summary>Re-recovers one interrupted transaction, without touching the others.</summary>
+    /// <param name="transactionId">Transaction to roll back.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<JournalTransactionRecoveryResult> RecoverTransactionAsync(
+        string transactionId,
         IAppLogger logger,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(transactionId);
         ArgumentNullException.ThrowIfNull(logger);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var journal = All().FirstOrDefault(j =>
+            string.Equals(j.TransactionId, transactionId, StringComparison.Ordinal));
+        if (journal is null)
+        {
+            return Task.FromResult(new JournalTransactionRecoveryResult(
+                false, false, ["Transaction not found."]));
+        }
+
+        if (journal.State is JournalState.Applied or JournalState.Committed)
+        {
+            return Task.FromResult(new JournalTransactionRecoveryResult(
+                false, false, ["The transaction already passed its commit point; it must not be rolled back."]));
+        }
+
+        var rollback = RollbackDetailed(journal, logger);
+        if (rollback.Failures.Count == 0 && rollback.Deferred.Count == 0)
+        {
+            Transition(journal, JournalState.RolledBack);
+            Clear(journal.TransactionId);
+            return Task.FromResult(new JournalTransactionRecoveryResult(true, false, []));
+        }
+
+        var details = rollback.Failures.Concat(rollback.Deferred).ToList();
+        Transition(journal, JournalState.Failed, string.Join("; ", details));
+        return Task.FromResult(new JournalTransactionRecoveryResult(false, rollback.Deferred.Count > 0, details));
+    }
+
+    public Task<JournalRecoveryReport> RecoverAsync(
+        IAppLogger logger,
+        CancellationToken cancellationToken = default)
+    {        ArgumentNullException.ThrowIfNull(logger);
 
         var recovered = new List<string>();
         var failed = new List<string>();
@@ -384,6 +423,19 @@ public sealed class JournalService : IJournalService
         var failures = new List<string>();
         var deferred = new List<string>();
         var blockedDeletes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // The undo list is replayed in reverse. For an overwritten file the placement undo was added
+        // after the restore undo, so the placement would be removed before we discover that its
+        // backup is gone — leaving neither the mod file nor the original. Inspect the restores first
+        // and block the matching placement deletes up front.
+        foreach (var restore in journal.UndoActions.OfType<RestoreOverwrittenFileUndo>())
+        {
+            if (!FileSystemOps.ExistsNoFollow(restore.BackupPath)
+                || !HashMatches(restore.BackupPath, restore.OriginalSha256))
+            {
+                blockedDeletes.Add(restore.Path);
+            }
+        }
 
         Transition(journal, JournalState.Applying, journal.Error);
         Append(journal, JournalStepKind.RollbackBegin, null, $"{journal.UndoActions.Count} action(s) to reverse");

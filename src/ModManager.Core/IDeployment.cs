@@ -97,6 +97,7 @@ public interface IDeploymentApplier
     /// <param name="logger">Logger.</param>
     /// <param name="progress">Progress sink, may be null.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="checkpoints">Test-only deployment checkpoints; production passes null.</param>
     Task<DeployResult> ApplyAsync(
         DeploymentPlan plan,
         GameDefinition definition,
@@ -104,7 +105,8 @@ public interface IDeploymentApplier
         DeploymentOptions settings,
         IAppLogger logger,
         IProgress<DeployProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Services.IDeploymentCheckpointSink? checkpoints = null);
 
     /// <summary>
     /// Reverses one mod's deployment, restoring every file it overwrote.

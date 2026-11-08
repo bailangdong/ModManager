@@ -82,8 +82,14 @@ public sealed class InstallationGate : IInstallationGate
             return trimmed.ToUpperInvariant();
         }
 
-        var full = Path.GetFullPath(trimmed);
-        return Path.TrimEndingDirectorySeparator(full).ToUpperInvariant();
+        if (!PhysicalPathResolver.TryResolve(trimmed, out var resolved, out var error))
+        {
+            // Do not fall back to the lexical path: two aliases would then get different lock
+            // identities and could deploy into the same game directory concurrently.
+            throw new IOException(error ?? "The deployment root could not be resolved to a physical path.");
+        }
+
+        return resolved;
     }
 
     private static string BuildMutexName(string normalizedResource)
