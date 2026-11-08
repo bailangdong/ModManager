@@ -278,6 +278,43 @@ public sealed class InstallPipelineTests
         Assert.Contains(result.Warnings, w => w.Contains("kept", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Uninstalling must not restore the vanilla backup over a file the user edited after installation.
+    /// The edit wins over both the mod and the game's original bytes.
+    /// </summary>
+    [Fact]
+    public async Task UninstallKeepsUserEditsInsteadOfRestoringTheVanillaBackup()
+    {
+        var (host, gameRoot) = NewEnvironment();
+        using var _ = host;
+
+        var vanilla = Path.Combine(gameRoot, "Mods", "vanilla.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(vanilla)!);
+        File.WriteAllText(vanilla, "original game bytes");
+
+        var archive = TestArchives.CreateZip(host.Tree, "overwriter.zip", ("Mods/vanilla.txt", "mod replacement"));
+        var staged = await StageAsync(host, archive);
+
+        var install = await InstallAsync(host, gameRoot, staged);
+        Assert.True(install.Succeeded, install.Error);
+        Assert.Equal(1, install.BackupCount);
+
+        // The user edits the deployed file. Uninstall promises to keep that edit.
+        File.WriteAllText(vanilla, "user edit after install");
+
+        var result = await host.Install.UninstallAsync(
+            GameId,
+            staged.Metadata.Id,
+            new TestGameAdapter(),
+            gameRoot,
+            deleteModifiedFiles: false,
+            host.Logger);
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.Equal("user edit after install", File.ReadAllText(vanilla));
+        Assert.Contains(result.Warnings, w => w.Contains("kept", StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Uninstalling only ever removes the files the mod itself deployed.</summary>
     [Fact]
     public async Task UninstallOnlyRemovesFilesTheModDeployed()

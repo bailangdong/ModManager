@@ -398,6 +398,7 @@ public sealed class DeploymentApplier : IDeploymentApplier
                 }
 
                 var canonical = check.CanonicalPath!;
+                var keptModified = false;
 
                 if (FileSystemOps.ExistsNoFollow(canonical))
                 {
@@ -412,10 +413,20 @@ public sealed class DeploymentApplier : IDeploymentApplier
                     }
                     else
                     {
+                        keptModified = true;
                         warnings.Add(
-                            $"Kept '{file.RelativeTarget}': its contents changed since it was installed, so it was not deleted.");
+                            $"Kept '{file.RelativeTarget}': its contents changed since it was installed, so it was not deleted or overwritten.");
                         _journals.Append(journal, JournalStepKind.FileDeleted, canonical, "kept: modified after deploy", succeeded: false);
                     }
+                }
+
+                // A user-edited file must not be replaced by a backup or by another mod's staged copy.
+                // Restoring underneath it would silently destroy the edit we just promised to keep.
+                if (keptModified)
+                {
+                    completed++;
+                    progress?.Report(new DeployProgress(total, completed, file.RelativeTarget, null, 0));
+                    continue;
                 }
 
                 // Put the original back if we displaced one.
