@@ -1,0 +1,5 @@
+<solution>
+  <project path="src/ModManager.Core/ModManager.Core.csproj" />
+  <project path="src/ModManager.App/ModManager.App.csproj" />
+  <project path="tests/ModManager.Tests/ModManager.Tests.csproj" />
+</solution>

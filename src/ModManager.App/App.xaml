@@ -1,0 +1,53 @@
+<Application x:Class="ModManager.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ModManager.App.ViewModels"
+             xmlns:views="clr-namespace:ModManager.App.Views">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Theme/Fluent.xaml" />
+        <ResourceDictionary Source="Theme/Controls.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <!--
+        View-first mapping. Each page is a DataTemplate keyed by its view-model type, so the shell's
+        ContentControl resolves a page without a single line of navigation code in the window. Adding a
+        page is therefore a template plus a view-model, not a change to the shell.
+
+        The two prefixes are deliberately distinct: view-models live in ModManager.App.ViewModels and views
+        in ModManager.App.Views, so a single prefix aimed at ModManager.App would resolve neither.
+      -->
+      <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
+        <views:DashboardView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:GamesViewModel}">
+        <views:GamesView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:ModsViewModel}">
+        <views:ModsView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:OnlineModsViewModel}">
+        <views:OnlineModsView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:LoadOrderViewModel}">
+        <views:LoadOrderView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:DownloadsViewModel}">
+        <views:DownloadsView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:ProfilesViewModel}">
+        <views:ProfilesView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:ConflictsViewModel}">
+        <views:ConflictsView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+        <views:SettingsView />
+      </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:LogsViewModel}">
+        <views:LogsView />
+      </DataTemplate>
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>

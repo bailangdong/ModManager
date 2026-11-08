@@ -1,0 +1,54 @@
+<Window x:Class="ModManager.App.Views.LaunchSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="启动设置"
+        Width="520"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BackgroundBrush}"
+        TextOptions.TextFormattingMode="Ideal"
+        UseLayoutRounding="True">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel Grid.Row="0">
+      <TextBlock Text="{Binding GameName, RelativeSource={RelativeSource AncestorType=Window}}"
+                 Style="{StaticResource SubtitleText}" />
+      <TextBlock Text="留空 EXE 时使用游戏定义的默认启动方式。"
+                 Style="{StaticResource CaptionText}"
+                 Margin="0,4,0,12" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="1">
+      <TextBlock Text="游戏 EXE（绝对路径，或相对安装目录）" Style="{StaticResource BodyText}" />
+      <TextBox x:Name="ExeBox" Style="{StaticResource AppTextBox}" Margin="0,6,0,12" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="2">
+      <TextBlock Text="启动参数" Style="{StaticResource BodyText}" />
+      <TextBox x:Name="ArgsBox" Style="{StaticResource AppTextBox}" Margin="0,6,0,12" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="3">
+      <TextBlock Text="工作目录（留空 = 安装目录）" Style="{StaticResource BodyText}" />
+      <TextBox x:Name="WorkDirBox" Style="{StaticResource AppTextBox}" Margin="0,6,0,16" />
+    </StackPanel>
+
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Style="{StaticResource SecondaryButton}"
+              Content="取消"
+              Margin="0,0,8,0"
+              Click="OnCancel" />
+      <Button Style="{StaticResource PrimaryButton}"
+              Content="保存"
+              Click="OnSave" />
+    </StackPanel>
+  </Grid>
+</Window>

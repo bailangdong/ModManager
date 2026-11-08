@@ -1,0 +1,411 @@
+<!--
+  Fluent-inspired design tokens.
+
+  DESIGN NOTE — the user's spec asks for a modern Windows Fluent / SaaS dashboard look and explicitly
+  says not to copy any reference project's UI. So nothing here is derived from Modrix (which uses iced,
+  a completely different toolkit) or from Vortex or MO2. What is borrowed is only the *outcome* those
+  applications aim at: a quiet, dense, readable shell where colour carries meaning rather than decoration.
+
+  The palette is therefore deliberately small and semantic — background, surface, border, text, accent,
+  and four state colours — so that a status badge reads the same everywhere it appears. Sizes are
+  multiples of four, which is what makes a hand-written layout look intentional rather than arbitrary.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+  <!-- ============================ Colour tokens ============================ -->
+
+  <!--
+    Light-first palette: quiet surfaces, dark text, a single blue accent.
+
+    These values are the light half of AppearanceService.Palette and must stay identical to it. The two
+    exist because they answer different questions — this dictionary is what a view renders with before any
+    theme has been applied (design time, and the first frame), while the service is what republishes them
+    when the user switches. When the two drifted apart the difference was invisible in the running app but
+    real: the first frame used one background and every later frame another.
+  -->
+  <Color x:Key="ColorBackground">#FFF5F7FA</Color>
+  <Color x:Key="ColorSurface">#FFFFFFFF</Color>
+  <Color x:Key="ColorSurfaceRaised">#FFFAFBFC</Color>
+  <Color x:Key="ColorSurfaceMuted">#FFF1F4F8</Color>
+  <!--
+    Borders, raised from #E2E8F0 / #CBD5E1 because on a white surface the old values measured 1.23 and 1.38
+    against the background — a 1px line that effectively disappears, which is what made inputs and checkboxes
+    look like floating text. 1.53 / 1.88 is a deliberate middle ground: full WCAG 1.4.11 compliance for
+    non-text UI needs 3:1, and going that far turns a quiet Fluent surface into a boxed-in form.
+  -->
+  <Color x:Key="ColorBorder">#FFC6D2E1</Color>
+  <Color x:Key="ColorBorderStrong">#FFA9B8CB</Color>
+
+  <Color x:Key="ColorText">#FF172033</Color>
+  <Color x:Key="ColorTextSecondary">#FF475569</Color>
+  <Color x:Key="ColorTextDisabled">#FF64748B</Color>
+
+  <Color x:Key="ColorAccent">#FF2563EB</Color>
+  <Color x:Key="ColorAccentHover">#FF1D4FD7</Color>
+  <Color x:Key="ColorAccentPressed">#FF1A44B8</Color>
+  <Color x:Key="ColorAccentSoft">#FFE8F0FF</Color>
+
+  <!-- Text drawn on the accent colour. Must exist here as well as in the service: a DynamicResource that
+       resolves to nothing fails silently, which for the primary button would mean black text on blue. -->
+  <Color x:Key="ColorOnAccent">#FFFFFFFF</Color>
+
+  <!--
+    State colours, darkened for the light palette so they stay readable when used as badge text on top of
+    their own 16% tint. Measured against the composited fill: Success 4.05 → 5.56, Warning 3.99 → 5.50,
+    Info 4.13 → 5.22. Accent is deliberately NOT Info: the accent sits behind white text and measures 5.17,
+    so darkening it would only dull the primary action.
+  -->
+  <Color x:Key="ColorSuccess">#FF166534</Color>
+  <Color x:Key="ColorWarning">#FF92400E</Color>
+  <Color x:Key="ColorDanger">#FFB91C1C</Color>
+  <Color x:Key="ColorInfo">#FF1D4ED8</Color>
+
+  <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource ColorBackground}" />
+  <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource ColorSurface}" />
+  <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="{StaticResource ColorSurfaceRaised}" />
+  <SolidColorBrush x:Key="SurfaceMutedBrush" Color="{StaticResource ColorSurfaceMuted}" />
+  <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource ColorBorder}" />
+  <SolidColorBrush x:Key="BorderStrongBrush" Color="{StaticResource ColorBorderStrong}" />
+
+  <SolidColorBrush x:Key="TextBrush" Color="{StaticResource ColorText}" />
+  <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource ColorTextSecondary}" />
+  <SolidColorBrush x:Key="TextDisabledBrush" Color="{StaticResource ColorTextDisabled}" />
+
+  <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource ColorAccent}" />
+  <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource ColorAccentHover}" />
+  <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource ColorAccentPressed}" />
+  <SolidColorBrush x:Key="AccentSoftBrush" Color="{StaticResource ColorAccentSoft}" />
+  <SolidColorBrush x:Key="OnAccentBrush" Color="{StaticResource ColorOnAccent}" />
+
+  <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource ColorSuccess}" />
+  <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource ColorWarning}" />
+  <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource ColorDanger}" />
+  <SolidColorBrush x:Key="InfoBrush" Color="{StaticResource ColorInfo}" />
+
+  <!-- Tinted fills for badges and callouts: the state colour at low alpha, so the text stays legible. -->
+  <SolidColorBrush x:Key="SuccessFillBrush" Color="{StaticResource ColorSuccess}" Opacity="0.16" />
+  <SolidColorBrush x:Key="WarningFillBrush" Color="{StaticResource ColorWarning}" Opacity="0.16" />
+  <SolidColorBrush x:Key="DangerFillBrush" Color="{StaticResource ColorDanger}" Opacity="0.16" />
+  <SolidColorBrush x:Key="InfoFillBrush" Color="{StaticResource ColorInfo}" Opacity="0.16" />
+
+  <!-- ============================ Type scale ============================ -->
+
+  <!--
+    Sizes are in DIPs (1 DIP = 1/96 inch); WPF converts them for the monitor's DPI, so no scaling factor is
+    applied here.
+
+    Caption moved from 11 to 12. At 11 the helper text was legible in isolation but read as a footnote
+    against 13px body text, and at 125% DPI it blurred into the border colours. 12 keeps it visibly
+    subordinate without turning it into decoration.
+  -->
+  <sys:Double x:Key="FontSizeCaption">12</sys:Double>
+  <sys:Double x:Key="FontSizeBody">13</sys:Double>
+  <sys:Double x:Key="FontSizeSubtitle">15</sys:Double>
+  <sys:Double x:Key="FontSizeTitle">20</sys:Double>
+  <sys:Double x:Key="FontSizeDisplay">28</sys:Double>
+
+  <!--
+    Chinese-first type stack. Microsoft YaHei UI renders Simplified Chinese with the crisp, modern
+    proportions the interface is designed around; Segoe UI stays as the Latin fallback so digits and
+    technical tokens (SHA256, ZIP, .NET) keep their familiar shapes.
+  -->
+  <FontFamily x:Key="UiFont">Microsoft YaHei UI, Microsoft YaHei, Segoe UI, Arial</FontFamily>
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, Microsoft YaHei UI</FontFamily>
+
+  <!-- ============================ Spacing scale ============================ -->
+
+  <Thickness x:Key="PagePadding">28</Thickness>
+  <Thickness x:Key="CardPadding">18</Thickness>
+  <Thickness x:Key="ControlPadding">12,7</Thickness>
+  <CornerRadius x:Key="CardRadius">12</CornerRadius>
+  <CornerRadius x:Key="ControlRadius">8</CornerRadius>
+  <CornerRadius x:Key="PillRadius">999</CornerRadius>
+
+  <!--
+    One shared soft shadow, declared once and reused by every raised surface. A single 1px border plus
+    this shadow is what separates "a modern desktop tool" from "a WPF form with rectangles".
+  -->
+  <DropShadowEffect x:Key="CardShadow"
+                    Color="#FF101828"
+                    BlurRadius="20"
+                    ShadowDepth="2"
+                    Direction="270"
+                    Opacity="0.08"
+                    RenderingBias="Performance" />
+  <DropShadowEffect x:Key="SoftShadow"
+                    Color="#FF101828"
+                    BlurRadius="10"
+                    ShadowDepth="1"
+                    Direction="270"
+                    Opacity="0.06"
+                    RenderingBias="Performance" />
+
+  <!-- ============================ Base text styles ============================ -->
+
+  <Style x:Key="DisplayText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeDisplay}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="TitleText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeTitle}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="SubtitleText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeSubtitle}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+  </Style>
+
+  <Style x:Key="BodyText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="SecondaryText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="CaptionText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="SectionHeaderText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="Margin" Value="0,0,0,8" />
+  </Style>
+
+  <!-- The heading of a page, paired with a quiet one-line explanation underneath. -->
+  <Style x:Key="PageTitleText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="22" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <Style x:Key="PageSubtitleText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="Margin" Value="0,6,0,0" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- Sidebar group caption: 游戏管理 / Mod 管理 / 管理. -->
+  <Style x:Key="NavGroupText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextDisabledBrush}" />
+    <Setter Property="Margin" Value="12,16,0,6" />
+  </Style>
+
+  <Style x:Key="MonoText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- ============================ Containers ============================ -->
+
+  <Style x:Key="Card" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
+    <Setter Property="Padding" Value="{StaticResource CardPadding}" />
+    <Setter Property="Effect" Value="{StaticResource CardShadow}" />
+  </Style>
+
+  <Style x:Key="RaisedCard" TargetType="Border" BasedOn="{StaticResource Card}">
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}" />
+  </Style>
+
+  <!-- A flat panel: no shadow, for surfaces that sit inside another card. -->
+  <Style x:Key="FlatCard" TargetType="Border" BasedOn="{StaticResource Card}">
+    <Setter Property="Effect" Value="{x:Null}" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}" />
+  </Style>
+
+  <!--
+    A metric tile. The big number carries the meaning, so it gets the display size and the label above
+    it stays deliberately quiet — the reading order a person actually uses on a dashboard.
+  -->
+  <Style x:Key="StatCard" TargetType="Border" BasedOn="{StaticResource Card}">
+    <Setter Property="Padding" Value="18,16" />
+    <Setter Property="MinWidth" Value="150" />
+  </Style>
+
+  <Style x:Key="Divider" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="0,12" />
+  </Style>
+
+  <!-- A callout used for the "needs attention" panels. The tone is chosen by the caller so the same
+       visual language covers info, warning and error without three near-identical styles. -->
+  <Style x:Key="Callout" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource InfoFillBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
+    <Setter Property="Padding" Value="12" />
+  </Style>
+
+  <!-- ============================ Page chrome ============================ -->
+
+  <!--
+    A page header: title, one line of explanation, and the page's own actions on the right.
+
+    Every page opens with this, which is what makes the shell feel like one application instead of eight.
+    It carries no card, no shadow and no background — a header that competes with the content below it is
+    the single most common way a desktop tool starts to look cluttered.
+  -->
+  <Thickness x:Key="PageHeaderPadding">28,22,28,16</Thickness>
+  <Thickness x:Key="PageBodyPadding">28,0,28,24</Thickness>
+
+  <!-- ============================ Rows and tables ============================ -->
+
+  <!--
+    Tables are built from a header Grid plus a ListBox of row templates rather than a DataGrid.
+    A DataGrid brings its own editing, clipboard and column-resize behaviours that this application does
+    not want, and every one of them would have to be switched off and re-styled. A ListBox of rows is the
+    same visual result with none of the surface area.
+  -->
+  <Thickness x:Key="RowPadding">14,9</Thickness>
+  <Thickness x:Key="TableHeaderPadding">14,0,14,8</Thickness>
+
+  <Style x:Key="TableSurface" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
+    <!-- No shadow: a table is a surface, not a floating card. -->
+  </Style>
+
+  <Style x:Key="TableHeaderText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <!-- A table row: full-width hit area, a hairline separator, and a soft selected state. -->
+  <Style x:Key="TableRow" TargetType="ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <Border x:Name="Root"
+                  Background="Transparent"
+                  BorderBrush="{DynamicResource BorderBrush}"
+                  BorderThickness="0,0,0,1"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Root" Property="Background" Value="{DynamicResource SurfaceMutedBrush}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Root" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- A row in a list that is not a table: two lines of text and a trailing action. -->
+  <Style x:Key="CompactRow" TargetType="ListBoxItem" BasedOn="{StaticResource TableRow}" />
+
+  <!-- ============================ Underline tabs ============================ -->
+
+  <!--
+    The segmented control used at the top of a list ("已安装 / 可更新 / 本地 Mod"). The selected tab is
+    marked by an accent underline as well as colour, so the state survives a monochrome screenshot and a
+    colour-blind reader.
+  -->
+  <Style x:Key="UnderlineTab" TargetType="RadioButton">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="Padding" Value="2,6" />
+    <Setter Property="Margin" Value="0,0,20,0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="*" />
+              <RowDefinition Height="2" />
+            </Grid.RowDefinitions>
+            <ContentPresenter Grid.Row="0"
+                              Margin="{TemplateBinding Padding}"
+                              VerticalAlignment="Center" />
+            <Border x:Name="Underline"
+                    Grid.Row="1"
+                    Background="Transparent"
+                    CornerRadius="1" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Underline" Property="Background" Value="{DynamicResource AccentBrush}" />
+              <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              <Setter Property="FontWeight" Value="SemiBold" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- A quiet label/value pair used in detail panes. -->
+  <Style x:Key="FieldLabelText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style x:Key="FieldValueText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+    <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+</ResourceDictionary>

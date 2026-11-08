@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NexusProbe: a deliberately tiny, low-frequency live check of the real Nexus Mods API.
+
+    It exists because a fake provider cannot tell you whether the credential works, whether the network is
+    reachable, or whether the response shapes match. It sends a handful of requests at most and prints only
+    non-sensitive facts: no API key, no headers, no signed URLs. Not part of the solution build.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ModManager.NexusProbe</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ModManager.Core\ModManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

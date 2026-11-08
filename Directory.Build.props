@@ -1,0 +1,25 @@
+<Project>
+
+  <!--
+    Solution-wide build settings.
+
+    DESIGN NOTE (see docs/ARCHITECTURE.md §"Why these constraints"):
+    Nullable + TreatWarningsAsErrors are enabled everywhere because the deploy engine
+    touches the user's game files. Modrix enforces a Rust adaptation of the "Power of Ten"
+    (no unwrap()/panic! in production code, bounded loops, checked arithmetic) via workspace
+    lints rather than convention. The closest .NET equivalent is to make the compiler refuse
+    to accept the sloppy cases, so we mirror that discipline here.
+  -->
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+</Project>

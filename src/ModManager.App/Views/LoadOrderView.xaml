@@ -1,0 +1,135 @@
+<!--
+  Load order page: the enabled mods of the active game, in resolution order.
+  Moving a row changes who wins contested files; saving redeploys.
+-->
+<UserControl x:Class="ModManager.App.Views.LoadOrderView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModManager.App.Views"
+             Background="Transparent">
+  <UserControl.Resources>
+    <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:BrushPassThroughConverter x:Key="BrushPass" />
+  </UserControl.Resources>
+
+  <Grid Margin="{StaticResource PagePadding}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- ===== Header ===== -->
+    <Grid Grid.Row="0" Margin="0,0,0,14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel Grid.Column="0">
+        <TextBlock Text="加载顺序" Style="{StaticResource PageTitleText}" />
+        <TextBlock Text="{Binding Status}" Style="{StaticResource SecondaryText}" Margin="0,4,0,0" />
+      </StackPanel>
+
+      <Button Grid.Column="1"
+              Style="{StaticResource PrimaryButton}"
+              Content="保存并部署"
+              VerticalAlignment="Top"
+              Command="{Binding SaveCommand}" />
+    </Grid>
+
+    <TextBlock Grid.Row="1"
+               Text="顺序越靠后的 Mod 优先级越高：修改同一文件时，靠后的 Mod 生效。"
+               Style="{StaticResource CaptionText}"
+               Margin="0,0,0,10" />
+
+    <!-- ===== Body: ordered list + conflict preview ===== -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="420" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ListBox Grid.Column="0"
+               Style="{StaticResource AppListBox}"
+               ItemContainerStyle="{StaticResource AppListBoxItem}"
+               ItemsSource="{Binding Items}"
+               SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+               AlternationCount="{Binding Items.Count}">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Border Style="{StaticResource Card}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Style="{StaticResource StatusPill}"
+                        Background="{DynamicResource AccentBrush}"
+                        VerticalAlignment="Center"
+                        Margin="0,0,12,0">
+                  <TextBlock Text="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=AlternationIndex}"
+                             Style="{StaticResource StatusPillText}"
+                             Foreground="{DynamicResource OnAccentBrush}" />
+                </Border>
+
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="{Binding Name}" Style="{StaticResource SubtitleText}" />
+                  <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <TextBlock Text="{Binding Version}" Style="{StaticResource CaptionText}" Margin="0,0,14,0" />
+                    <TextBlock Text="{Binding FileCountText}" Style="{StaticResource CaptionText}" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <ScrollViewer Grid.Column="1" Width="440" VerticalScrollBarVisibility="Auto" Margin="16,0,0,0">
+        <StackPanel>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <TextBlock Text="调整顺序" Style="{StaticResource SectionHeaderText}" />
+              <TextBlock Text="选择一个 Mod，然后上移或下移。修改立即反映到右侧的冲突预览，点击“保存并部署”后生效。"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,6,0,12" />
+
+              <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="上移"
+                        Margin="0,0,8,0"
+                        Command="{Binding MoveUpCommand}"
+                        CommandParameter="{Binding SelectedRow}" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="下移"
+                        Command="{Binding MoveDownCommand}"
+                        CommandParameter="{Binding SelectedRow}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+            <StackPanel>
+              <TextBlock Text="冲突预览（按当前顺序）" Style="{StaticResource SectionHeaderText}" />
+              <TextBlock Text="{Binding ConflictSummary}" Style="{StaticResource CaptionText}" Margin="0,6,0,6" />
+
+              <ItemsControl ItemsSource="{Binding Conflicts}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel Margin="0,0,0,8">
+                      <TextBlock Text="{Binding Chain}" Style="{StaticResource MonoText}" />
+                      <TextBlock Text="{Binding Reason}" Style="{StaticResource CaptionText}" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</UserControl>

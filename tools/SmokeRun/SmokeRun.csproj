@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SmokeRun: a headless end-to-end verification of the real engine against
+    artifacts\test-game and artifacts\test-mods. It is NOT part of the solution build on
+    purpose — it is the "actually run it" check the test suite cannot provide.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ModManager.SmokeRun</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ModManager.Core\ModManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

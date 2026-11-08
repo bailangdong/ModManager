@@ -1,0 +1,581 @@
+<!--
+  Online Mods page: browse Nexus Mods for the active game and install through the normal pipeline.
+
+  The page is explicit about what it cannot do. A result whose author disabled manager downloads, or a
+  session without an API key, shows "前往 Nexus 页面" instead of a download button — a button that would
+  fail later is worse than an honest pointer at the real page.
+-->
+<UserControl x:Class="ModManager.App.Views.OnlineModsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModManager.App.Views"
+             Background="Transparent">
+  <UserControl.Resources>
+    <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:BrushPassThroughConverter x:Key="BrushPass" />
+    <local:InverseBoolConverter x:Key="InverseBool" />
+  </UserControl.Resources>
+
+  <Grid Margin="{StaticResource PagePadding}">
+    <Grid.RowDefinitions>
+      <!-- 行 0：页头（标题 + Nexus 徽章 + 设置） -->
+      <RowDefinition Height="Auto" />
+      <!-- 行 1：筛选条（搜索 / 排序 / 成人内容 / 搜索 / 刷新） -->
+      <RowDefinition Height="Auto" />
+      <!-- 行 2：翻译工具条（必须独占一行，否则会叠回页头） -->
+      <RowDefinition Height="Auto" />
+      <!-- 行 3：内容（左列表 + 右侧详情） -->
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- ===== Header ===== -->
+    <Grid Grid.Row="0" Margin="0,0,0,14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel Grid.Column="0">
+        <TextBlock Text="在线 Mod" Style="{StaticResource PageTitleText}" />
+        <TextBlock Text="{Binding Status}" Style="{StaticResource PageSubtitleText}" />
+      </StackPanel>
+
+      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+        <Border Style="{StaticResource StatusPill}" Background="{DynamicResource SurfaceMutedBrush}" Margin="0,0,10,0">
+          <TextBlock Style="{StaticResource StatusPillText}"
+                     Foreground="{DynamicResource TextSecondaryBrush}"
+                     Text="{Binding GameName, StringFormat=Nexus：{0}}" />
+        </Border>
+        <Button Style="{StaticResource SecondaryButton}"
+                Content="Nexus 设置"
+                Command="{Binding OpenSettingsCommand}" />
+      </StackPanel>
+    </Grid>
+
+    <!-- ===== Filters ===== -->
+    <Grid Grid.Row="1" Margin="0,0,0,12">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="220" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBox Grid.Column="0"
+               Style="{StaticResource AppTextBox}"
+               Margin="0,0,10,0"
+               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+               ToolTip="按名称搜索 Nexus Mods 上的 Mod" />
+
+      <ComboBox Grid.Column="1"
+                Style="{StaticResource AppComboBox}"
+                ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                MinWidth="130"
+                Margin="0,0,10,0"
+                ItemsSource="{Binding SortOptions}"
+                SelectedItem="{Binding SortOption, Mode=TwoWay}" />
+
+      <CheckBox Grid.Column="2"
+                Style="{StaticResource AppCheckBox}"
+                Content="包含成人内容"
+                VerticalAlignment="Center"
+                Margin="0,0,12,0"
+                IsChecked="{Binding IncludeAdult, Mode=TwoWay}" />
+
+      <Button Grid.Column="3"
+              Style="{StaticResource PrimaryButton}"
+              Content="搜索"
+              Margin="0,0,8,0"
+              Command="{Binding SearchCommand}" />
+
+      <Button Grid.Column="4"
+              Style="{StaticResource SecondaryButton}"
+              Content="刷新"
+              Command="{Binding RefreshCommand}" />
+    </Grid>
+
+    <!--
+      Translation bar: an explicit row of its own between the filters and the content.
+
+      This element used to be a bare horizontal StackPanel with no Grid.Row. WPF put it in row 0 by
+      default, so it landed on top of the page header — the reported "翻译本页遮挡其他内容". The caption
+      is a star column instead of a StackPanel child, so a narrow window wraps the sentence rather than
+      pushing the button out of the visible area.
+    -->
+    <Grid Grid.Row="2" Margin="0,0,0,14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <Button Grid.Column="0"
+              Style="{StaticResource SecondaryButton}"
+              Content="翻译本页"
+              ToolTip="把当前列表里每个 Mod 的标题和简介翻译成中文（结果会缓存）"
+              Command="{Binding TranslatePageCommand}" />
+
+      <TextBlock Grid.Column="1"
+                 Text="使用“设置 → 翻译”中的引擎（本地 Argos 免费，无需密钥）"
+                 Style="{StaticResource CaptionText}"
+                 VerticalAlignment="Center"
+                 TextWrapping="Wrap"
+                 Margin="12,0,0,0" />
+    </Grid>
+
+    <!-- ===== Body ===== -->
+    <Grid Grid.Row="3">
+      <Grid.ColumnDefinitions>
+        <!--
+          The list column may shrink to 360: with the 400px detail column that is 760px of body, which
+          still fits the content area at the window's 1024px minimum width, so the detail panel is never
+          pushed past the right edge.
+        -->
+        <ColumnDefinition Width="*" MinWidth="360" />
+        <ColumnDefinition Width="400" />
+      </Grid.ColumnDefinitions>
+
+      <!-- Left: results, or whatever is blocking them. -->
+      <Grid Grid.Column="0">
+        <!-- Not configured -->
+        <Border Style="{StaticResource Card}"
+                VerticalAlignment="Top"
+                Padding="22"
+                Visibility="{Binding NeedsSetup, Converter={StaticResource BoolToVisibility}}">
+          <StackPanel>
+            <TextBlock Text="需要先配置 Nexus" Style="{StaticResource SubtitleText}" />
+            <TextBlock Text="{Binding SetupText}"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,8,0,0" />
+            <TextBlock Text="未配置时仍可浏览：在浏览器中打开 Nexus 页面手动下载，再用“从压缩包安装…”导入。"
+                       Style="{StaticResource CaptionText}"
+                       Margin="0,8,0,0" />
+            <Button Style="{StaticResource PrimaryButton}"
+                    Content="打开 Nexus 设置"
+                    HorizontalAlignment="Left"
+                    Margin="0,14,0,0"
+                    Command="{Binding OpenSettingsCommand}" />
+          </StackPanel>
+        </Border>
+
+        <!-- Error -->
+        <Border Style="{StaticResource Callout}"
+                Background="{DynamicResource DangerFillBrush}"
+                VerticalAlignment="Top"
+                Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
+          <StackPanel>
+            <TextBlock Text="请求失败"
+                       Style="{StaticResource SubtitleText}"
+                       Foreground="{DynamicResource DangerBrush}" />
+            <TextBlock Text="{Binding ErrorText}"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,6,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="重试"
+                      Margin="0,0,8,0"
+                      Command="{Binding RefreshCommand}" />
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="打开 Nexus 设置"
+                      Margin="0,0,8,0"
+                      Visibility="{Binding ErrorNeedsSettings, Converter={StaticResource BoolToVisibility}}"
+                      Command="{Binding OpenSettingsCommand}" />
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="打开 Nexus 页面"
+                      Visibility="{Binding ErrorNeedsNexusPage, Converter={StaticResource BoolToVisibility}}"
+                      Command="{Binding OpenDomainPageCommand}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <!-- Empty -->
+        <Border Style="{StaticResource Card}"
+                VerticalAlignment="Top"
+                Padding="28,32"
+                Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
+          <StackPanel HorizontalAlignment="Center">
+            <TextBlock Text="没有找到匹配的 Mod" Style="{StaticResource SubtitleText}" HorizontalAlignment="Center" />
+            <TextBlock Text="换个关键词，或清空搜索框后刷新。"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,8,0,0" />
+          </StackPanel>
+        </Border>
+
+        <!--
+          Results fill the left column: the summary/pager keep their natural height and the list takes the
+          rest, so the list box scrolls inside the visible area. It used to be a vertical StackPanel, which
+          measures the ListBox with infinite height (capped at a fixed 1000) — the bottom rows were laid
+          out below the page and could not be reached at a normal window height.
+        -->
+        <Grid Visibility="{Binding Results.Count, Converter={StaticResource BoolToVisibility}}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{Binding ResultSummary}"
+                       Style="{StaticResource SectionHeaderText}"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center"
+                       Margin="0"
+                       TextTrimming="CharacterEllipsis" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="上一页"
+                      MinWidth="72"
+                      Margin="0,0,6,0"
+                      Command="{Binding PreviousPageCommand}" />
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="下一页"
+                      MinWidth="72"
+                      Command="{Binding NextPageCommand}" />
+            </StackPanel>
+          </Grid>
+
+          <!--
+            Flat rows, not cards.
+
+            AppListBoxItem draws a rounded card with a border and an 8px gap per item, so a page of twenty
+            results became twenty boxes floating in white space. TableRow instead gives one continuous list
+            with hairline separators plus hover and selection states — the density a browser over 21,686 items
+            actually needs, and the thing the task meant by "don't wrap every region in a card".
+          -->
+          <ListBox Grid.Row="1"
+                   Style="{StaticResource AppListBox}"
+                   ItemContainerStyle="{StaticResource TableRow}"
+                   ItemsSource="{Binding Results}"
+                   SelectedItem="{Binding SelectedMod, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Border Padding="14,12">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Cover: the real image once it has loaded, otherwise a plain muted tile (no letter). -->
+                    <Border Grid.Column="0"
+                            Width="52"
+                            Height="52"
+                            CornerRadius="10"
+                            Background="{DynamicResource SurfaceMutedBrush}"
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Top">
+                      <Border.Clip>
+                        <RectangleGeometry Rect="0,0,52,52" RadiusX="10" RadiusY="10" />
+                      </Border.Clip>
+                      <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1">
+                      <!--
+                        Title line: the state pill is docked right and the name trims into whatever space is
+                        left. A horizontal StackPanel measures its children with infinite width, so
+                        TextTrimming on the name could never fire and a long title pushed the pill out of
+                        the card. The translated title gets its own line, where it trims on a narrow window
+                        instead of competing with the name.
+                      -->
+                      <DockPanel LastChildFill="True">
+                        <Border DockPanel.Dock="Right"
+                                Style="{StaticResource StatusPill}"
+                                Background="{Binding StateFill, Converter={StaticResource BrushPass}}"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center">
+                          <TextBlock Text="{Binding StateText}"
+                                     Style="{StaticResource StatusPillText}"
+                                     Foreground="{Binding StateTone, Converter={StaticResource BrushPass}}"
+                                     TextTrimming="CharacterEllipsis" />
+                        </Border>
+
+                        <!--
+                          Chinese first. The row used to put the English name here and the Chinese title on a
+                          small accent-coloured line underneath, so translating a page produced English with
+                          Chinese footnotes. DisplayTitle flips that; the original stays one quiet line below.
+                        -->
+                        <TextBlock Text="{Binding DisplayTitle}"
+                                   Style="{StaticResource BodyText}"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding OriginalTitle}" />
+                      </DockPanel>
+
+                      <TextBlock Text="{Binding OriginalTitle}"
+                                 Style="{StaticResource CaptionText}"
+                                 Margin="0,2,0,0"
+                                 TextTrimming="CharacterEllipsis"
+                                 Visibility="{Binding ShowOriginalTitle, Converter={StaticResource BoolToVisibility}}" />
+
+                      <TextBlock Text="{Binding DisplaySummary}"
+                                 Style="{StaticResource SecondaryText}"
+                                 Margin="0,5,0,0"
+                                 MaxHeight="36"
+                                 TextWrapping="Wrap"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip="{Binding DisplaySummary}" />
+
+                      <WrapPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="{Binding Author}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                        <TextBlock Text="{Binding VersionText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                        <TextBlock Text="{Binding DownloadsText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                        <TextBlock Text="{Binding UpdatedText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                        <TextBlock Text="{Binding CategoryText}" Style="{StaticResource CaptionText}" />
+                      </WrapPanel>
+
+                      <TextBlock Text="{Binding BlockingReason}"
+                                 Style="{StaticResource CaptionText}"
+                                 Foreground="{DynamicResource WarningBrush}"
+                                 Margin="0,6,0,0"
+                                 TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                      <Button Style="{StaticResource PrimaryButton}"
+                              MinWidth="96"
+                              Content="{Binding PrimaryActionText}"
+                              Visibility="{Binding CanInstall, Converter={StaticResource BoolToVisibility}}"
+                              Command="{Binding DataContext.InstallCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+                      <Button Style="{StaticResource SecondaryButton}"
+                              MinWidth="96"
+                              Margin="0,0,0,6"
+                              Content="前往 Nexus 页面"
+                              Visibility="{Binding Plan.NeedsConfiguration, Converter={StaticResource BoolToVisibility}}"
+                              Command="{Binding DataContext.OpenPageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+                      <Button Style="{StaticResource SecondaryButton}"
+                              MinWidth="96"
+                              Margin="0,0,0,6"
+                              Content="打开页面"
+                              Visibility="{Binding CanDownloadViaManager, Converter={StaticResource BoolToVisibility}}"
+                              Command="{Binding DataContext.OpenPageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+                      <Button Style="{StaticResource DangerButton}"
+                              MinWidth="96"
+                              Content="卸载"
+                              Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVisibility}}"
+                              Command="{Binding DataContext.UninstallCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Grid>
+
+      <!-- Right: detail of the selected mod. -->
+      <ScrollViewer Grid.Column="1"
+                    VerticalScrollBarVisibility="Auto"
+                    Margin="16,0,0,0">
+        <StackPanel>
+          <!-- Download progress -->
+          <Border Style="{StaticResource FlatCard}"
+                  Margin="0,0,0,10"
+                  Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+              <TextBlock Text="{Binding DownloadStatusText}" Style="{StaticResource BodyText}" />
+              <!-- Mode=OneWay is required: RangeBase.Value binds two-way by default, and the
+                   progress value is read-only state owned by the view-model. -->
+              <ProgressBar Style="{StaticResource AppProgressBar}"
+                           Height="6"
+                           Margin="0,8,0,0"
+                           Maximum="100"
+                           Value="{Binding DownloadProgress, Mode=OneWay}" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}" Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+              <TextBlock Text="{Binding DetailTitleText}"
+                         Style="{StaticResource SubtitleText}"
+                         TextWrapping="Wrap" />
+              <TextBlock Text="{Binding SelectedMod.OriginalTitle}"
+                         Style="{StaticResource CaptionText}"
+                         TextWrapping="Wrap"
+                         Margin="0,2,0,0"
+                         Visibility="{Binding SelectedMod.ShowOriginalTitle, Converter={StaticResource BoolToVisibility}}" />
+              <WrapPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <TextBlock Text="{Binding SelectedMod.Author}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                <TextBlock Text="{Binding SelectedMod.VersionText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                <TextBlock Text="{Binding SelectedMod.LocalVersionText}" Style="{StaticResource CaptionText}" />
+              </WrapPanel>
+
+              <Border Style="{StaticResource StatusPill}"
+                      Background="{Binding SelectedMod.StateFill, Converter={StaticResource BrushPass}}"
+                      HorizontalAlignment="Left"
+                      Margin="0,10,0,0">
+                <TextBlock Text="{Binding SelectedMod.StateText}"
+                           Style="{StaticResource StatusPillText}"
+                           Foreground="{Binding SelectedMod.StateTone, Converter={StaticResource BrushPass}}" />
+              </Border>
+
+              <TextBlock Text="{Binding SelectedMod.BlockingReason}"
+                         Style="{StaticResource CaptionText}"
+                         Foreground="{DynamicResource WarningBrush}"
+                         Margin="0,8,0,0"
+                         TextWrapping="Wrap" />
+
+              <Border Style="{StaticResource Divider}" />
+
+              <TextBlock Text="简介" Style="{StaticResource SectionHeaderText}" />
+              <!--
+                One pane, two sources. The switch in the translation row decides whether this shows the
+                English description or the Chinese translation; the original is always kept in memory, so
+                switching back is instant and lossless.
+              -->
+              <TextBlock Text="{Binding DetailBodyText}"
+                         Style="{StaticResource BodyText}"
+                         MaxHeight="240"
+                         TextWrapping="Wrap"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding DetailNote}"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,8,0,0"
+                         TextWrapping="Wrap" />
+
+              <Border Style="{StaticResource Divider}" />
+
+              <!--
+                Translation actions are explicit and separate: a title is what a user scans for, a description
+                is what they read, and each is cached under its own key so asking for one never invalidates
+                the other.
+              -->
+              <WrapPanel Orientation="Horizontal">
+                <TextBlock Text="中文翻译"
+                           Style="{StaticResource SectionHeaderText}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,8" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="翻译标题"
+                        Margin="0,0,8,8"
+                        ToolTip="只翻译当前 Mod 的标题；结果会缓存"
+                        Command="{Binding TranslateTitleCommand}" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="翻译描述"
+                        Margin="0,0,8,8"
+                        ToolTip="翻译简介与描述，保留 Markdown 结构、文件路径、URL 与版本号"
+                        Command="{Binding TranslateDescriptionCommand}" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="{Binding SourceToggleText}"
+                        Margin="0,0,0,8"
+                        ToolTip="在英文原文与中文译文之间切换；两者都会保留"
+                        Command="{Binding ToggleSourceCommand}" />
+              </WrapPanel>
+
+              <TextBlock Text="{Binding TranslationStatus}"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,8,0,0"
+                         TextWrapping="Wrap"
+                         Visibility="{Binding TranslationStatus, Converter={StaticResource BoolToVisibility}}" />
+
+              <Border Style="{StaticResource Divider}" />
+
+              <TextBlock Text="依赖" Style="{StaticResource SectionHeaderText}" />
+              <TextBlock Text="{Binding DependencySummary}"
+                         Style="{StaticResource SecondaryText}"
+                         TextWrapping="Wrap" />
+
+              <ItemsControl ItemsSource="{Binding DetailDependencies}" Margin="0,8,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Margin="{Binding Indent}">
+                      <TextBlock Text="{Binding Branch}" Style="{StaticResource MonoText}" Margin="0,0,6,0" />
+                      <TextBlock Text="{Binding Name}"
+                                 Style="{StaticResource BodyText}"
+                                 TextWrapping="NoWrap"
+                                 TextTrimming="CharacterEllipsis"
+                                 MaxWidth="170" />
+                      <TextBlock Text="{Binding StateText}"
+                                 Style="{StaticResource CaptionText}"
+                                 Foreground="{Binding Tone, Converter={StaticResource BrushPass}}"
+                                 Margin="8,0,0,0" />
+                      <TextBlock Text="{Binding VersionText}"
+                                 Style="{StaticResource CaptionText}"
+                                 Margin="8,0,0,0" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="安装缺失依赖"
+                      HorizontalAlignment="Left"
+                      Margin="0,10,0,0"
+                      Visibility="{Binding HasMissingDependencies, Converter={StaticResource BoolToVisibility}}"
+                      Command="{Binding InstallDependenciesCommand}" />
+
+              <Border Style="{StaticResource Divider}" />
+
+              <TextBlock Text="文件" Style="{StaticResource SectionHeaderText}" />
+              <ItemsControl ItemsSource="{Binding DetailFiles}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Style="{StaticResource FlatCard}" Padding="10,8" Margin="0,0,0,6">
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="{Binding Name}"
+                                     Style="{StaticResource BodyText}"
+                                     FontWeight="SemiBold"
+                                     TextWrapping="NoWrap"
+                                     TextTrimming="CharacterEllipsis"
+                                     MaxWidth="220" />
+                          <Border Style="{StaticResource StatusPill}" Margin="8,0,0,0">
+                            <TextBlock Text="{Binding PrimaryText}" Style="{StaticResource StatusPillText}" />
+                          </Border>
+                        </StackPanel>
+                        <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                          <TextBlock Text="{Binding VersionText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                          <TextBlock Text="{Binding SizeText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                          <TextBlock Text="{Binding CategoryText}" Style="{StaticResource CaptionText}" Margin="0,0,12,2" />
+                          <TextBlock Text="{Binding UploadedText}" Style="{StaticResource CaptionText}" />
+                        </WrapPanel>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <WrapPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button Style="{StaticResource PrimaryButton}"
+                        MinWidth="96"
+                        Margin="0,0,8,8"
+                        Content="{Binding SelectedMod.PrimaryActionText}"
+                        Visibility="{Binding SelectedMod.CanInstall, Converter={StaticResource BoolToVisibility}}"
+                        Command="{Binding InstallCommand}"
+                        CommandParameter="{Binding SelectedMod}" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Margin="0,0,8,8"
+                        Content="打开 Nexus 页面"
+                        Command="{Binding OpenPageCommand}"
+                        CommandParameter="{Binding SelectedMod}" />
+                <Button Style="{StaticResource DangerButton}"
+                        Margin="0,0,0,8"
+                        Content="卸载"
+                        Visibility="{Binding SelectedMod.IsInstalled, Converter={StaticResource BoolToVisibility}}"
+                        Command="{Binding UninstallCommand}"
+                        CommandParameter="{Binding SelectedMod}" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="选择一个 Mod 查看详情。"
+                     Style="{StaticResource SecondaryText}"
+                     Margin="0,10,0,0"
+                     Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</UserControl>

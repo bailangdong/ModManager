@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ModManager · 获取中心与本地管理</title>
+<style>
+  :root{
+    --bg:#0d0f14; --bg-2:#11141b; --panel:#151922; --panel-2:#1a1f2a;
+    --line:#252b38; --line-2:#313849;
+    --text:#e6e9ef; --muted:#9aa3b2; --dim:#6f7888;
+    --accent:#a78bfa; --accent-2:#7c3aed; --accent-soft:rgba(167,139,250,.12);
+    --danger:#f87171; --warn:#fbbf24; --ok:#4ade80; --info:#60a5fa;
+    --radius:8px; --row:56px;
+    --font:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.5;overflow:hidden}
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer}
+  ::selection{background:rgba(167,139,250,.28)}
+  .app{display:grid;grid-template-columns:212px 1fr;height:100vh;min-width:1080px}
+  .sidebar{background:var(--bg-2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 12px 12px}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 8px 18px}
+  .brand-mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#7c3aed,#a78bfa);display:grid;place-items:center;font-weight:800;font-size:13px;color:#fff}
+  .brand-name{font-weight:700;letter-spacing:.2px}
+  .brand-sub{font-size:11px;color:var(--dim);margin-top:1px}
+  .nav-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);padding:16px 10px 6px}
+  .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;color:var(--muted);border:1px solid transparent;background:none;width:100%;text-align:left;margin:1px 0}
+  .nav-item:hover{background:#171b24;color:var(--text)}
+  .nav-item.active{background:var(--accent-soft);color:#ddd6fe;border-color:rgba(167,139,250,.22)}
+  .nav-item .ico{width:16px;text-align:center;opacity:.9}
+  .nav-badge{margin-left:auto;font-size:10px;padding:1px 6px;border-radius:999px;background:#2a2140;color:#c4b5fd;border:1px solid #3b2d5e}
+  .sidebar-foot{margin-top:auto;border-top:1px solid var(--line);padding-top:10px}
+  .account{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px}
+  .avatar{width:24px;height:24px;border-radius:50%;background:#2b3344;display:grid;place-items:center;font-size:10px;color:#cbd5e1}
+  .account small{display:block;color:var(--dim);font-size:10px}
+  .main{display:flex;flex-direction:column;min-width:0;height:100vh}
+  .topbar{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 18px;background:var(--bg-2);flex:0 0 auto}
+  .game-select{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line-2);border-radius:6px;padding:6px 10px;min-width:190px}
+  .game-select .dot{width:8px;height:8px;border-radius:2px;background:#7dd3fc}
+  .game-select select{background:transparent;border:0;outline:0;font-weight:600;width:100%}
+  .seg{display:flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden;background:var(--panel)}
+  .seg button{border:0;background:transparent;color:var(--muted);padding:6px 10px;font-size:12px;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:0}
+  .seg button.active{background:#242a38;color:var(--text)}
+  .search{flex:1;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line-2);border-radius:6px;padding:6px 10px;max-width:520px}
+  .search input{flex:1;background:none;border:0;outline:0;color:var(--text);min-width:0}
+  .search input::placeholder{color:#687182}
+  .kbd{font-size:10px;color:var(--dim);border:1px solid var(--line-2);border-radius:4px;padding:1px 5px}
+  .top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .btn{border:1px solid var(--line-2);background:var(--panel);border-radius:6px;padding:6px 11px;color:var(--text)}
+  .btn:hover{background:#1f2531;border-color:#3d4659}
+  .btn.primary{background:var(--accent-2);border-color:#8b5cf6;color:#fff}
+  .btn.primary:hover{background:#6d28d9}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:4px 8px;font-size:11px}
+  .btn.danger{color:#fecaca;border-color:#5b2a2a;background:#2a1717}
+  .content{display:flex;flex:1;min-height:0}
+  .view{display:none;flex:1;min-height:0}
+  .view.active{display:flex}
+  .list-pane{width:46%;min-width:420px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .pane-head{padding:14px 18px 10px;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .pane-title{display:flex;align-items:baseline;gap:8px}
+  .pane-title h1{font-size:16px;margin:0;font-weight:650}
+  .pane-title .count{color:var(--dim);font-size:11px}
+  .filters{display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line-2);background:transparent;color:var(--muted);border-radius:999px;padding:3px 9px;font-size:11px}
+  .chip.active{background:var(--accent-soft);border-color:rgba(167,139,250,.35);color:#ddd6fe}
+  .chip:hover{color:var(--text)}
+  .spacer{flex:1}
+  .sort{background:none;border:0;color:var(--dim);font-size:11px}
+  .list{overflow:auto;flex:1;padding:4px 0 8px}
+  .mod-row{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:10px 16px;border-bottom:1px solid #1c212c;cursor:pointer;align-items:center}
+  .mod-row:hover{background:#141822}
+  .mod-row.selected{background:linear-gradient(90deg,rgba(124,58,237,.16),rgba(124,58,237,.03));box-shadow:inset 2px 0 0 var(--accent)}
+  .thumb{width:56px;height:56px;border-radius:5px;background:linear-gradient(135deg,#233,#3a2b55);border:1px solid #2d3546;object-fit:cover}
+  .mod-main{min-width:0}
+  .mod-title{display:flex;align-items:center;gap:6px}
+  .mod-title strong{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mod-sub{color:var(--muted);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mod-tags{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
+  .tag{font-size:10px;color:#aab3c2;border:1px solid #2c3444;border-radius:3px;padding:0 4px;background:#181d27}
+  .tag.platform{border-color:#3b2d5e;color:#c4b5fd;background:#211a33}
+  .tag.platform.thunder{border-color:#1e3a5f;color:#93c5fd;background:#122033}
+  .tag.platform.github{border-color:#334155;color:#cbd5e1;background:#18202c}
+  .mod-meta{text-align:right;color:var(--dim);font-size:10px;white-space:nowrap}
+  .dotsep{color:#3a4354;margin:0 4px}
+  .detail-pane{flex:1;min-width:0;overflow:auto;background:var(--bg)}
+  .detail{max-width:760px;margin:0 auto;padding:22px 26px 90px}
+  .detail-head{display:grid;grid-template-columns:96px 1fr;gap:16px}
+  .cover{width:96px;height:96px;border-radius:7px;background:linear-gradient(135deg,#3b2a5e,#1e3a4a);border:1px solid #3a4254;position:relative;overflow:hidden}
+  .cover:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.18),transparent 45%)}
+  .detail h2{font-size:20px;line-height:1.25;margin:0 0 4px;font-weight:680}
+  .byline{color:var(--muted);font-size:12px}
+  .byline a{color:#c4b5fd;text-decoration:none}
+  .detail-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;margin:18px 0;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .kv{display:flex;gap:8px;font-size:12px}
+  .kv .k{color:var(--dim);min-width:56px}
+  .kv .v{color:#d5dae3}
+  .tabs{display:flex;gap:18px;border-bottom:1px solid var(--line);margin:8px 0 14px}
+  .tab{border:0;background:none;color:var(--muted);padding:8px 0 9px;border-bottom:2px solid transparent;font-size:12px}
+  .tab.active{color:var(--text);border-bottom-color:var(--accent)}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+  .section-title{font-size:12px;color:var(--dim);letter-spacing:.04em;margin:18px 0 8px;font-weight:600}
+  .prose{color:#c3cad6;font-size:13px;line-height:1.75}
+  .prose p{margin:0 0 10px}
+  .original{margin-top:10px;border-top:1px dashed #2a3140;padding-top:10px;color:var(--dim);font-size:11px}
+  .original summary{cursor:pointer;color:#8b94a5}
+  .files{width:100%;border-collapse:collapse;font-size:12px}
+  .files th{text-align:left;color:var(--dim);font-weight:500;padding:7px 8px;border-bottom:1px solid var(--line);font-size:11px}
+  .files td{padding:9px 8px;border-bottom:1px solid #1d232e;color:#c8cfda}
+  .files tr:hover td{background:#121620}
+  .pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 7px;font-size:10px;border:1px solid transparent;white-space:nowrap}
+  .pill.ok{color:#bbf7d0;background:#14281c;border-color:#245232}
+  .pill.warn{color:#fde68a;background:#2a2313;border-color:#55451b}
+  .pill.err{color:#fecaca;background:#2a1717;border-color:#5b2a2a}
+  .pill.info{color:#bfdbfe;background:#132238;border-color:#25446b}
+  .pill.neutral{color:#cbd5e1;background:#1c222d;border-color:#313a4a}
+  .dep-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #1d232e}
+  .dep-row .name{font-weight:500}
+  .dep-row .ver{color:var(--dim);font-size:11px}
+  .dep-row .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .note{border-left:2px solid #3b4252;padding:8px 10px;color:#9aa3b2;background:#121620;font-size:11px;margin:10px 0}
+  .note.warn{border-left-color:#a16207;color:#d6c28a;background:#1f1a10}
+  .table-wrap{overflow:auto}
+  .data{width:100%;border-collapse:collapse;font-size:12px}
+  .data th{position:sticky;top:0;background:var(--bg-2);text-align:left;color:var(--dim);font-weight:500;font-size:11px;padding:9px 14px;border-bottom:1px solid var(--line);z-index:1}
+  .data td{padding:10px 14px;border-bottom:1px solid #1c212c;vertical-align:middle}
+  .data tr:hover td{background:#121620}
+  .source{display:inline-flex;align-items:center;gap:5px}
+  .src-dot{width:6px;height:6px;border-radius:50%;background:#a78bfa}
+  .src-dot.thunder{background:#60a5fa}.src-dot.github{background:#cbd5e1}.src-dot.local{background:#94a3b8}
+  .progress{height:4px;background:#242b38;border-radius:2px;overflow:hidden;min-width:90px}
+  .progress > i{display:block;height:100%;background:linear-gradient(90deg,#7c3aed,#a78bfa);border-radius:2px}
+  .row-actions{display:flex;gap:6px;justify-content:flex-end}
+  .empty{padding:40px 20px;text-align:center;color:var(--dim)}
+  .dock{position:fixed;left:212px;right:0;bottom:0;height:44px;background:#0f1219;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:20}
+  .dock .mini{font-size:11px;color:var(--muted)}
+  .dock .bar{width:130px}
+  .dock .grow{flex:1}
+  .toast{position:fixed;right:18px;bottom:58px;display:flex;flex-direction:column;gap:8px;z-index:60}
+  .toast div{background:#1b2230;border:1px solid #334155;border-left:3px solid var(--accent);padding:9px 12px;border-radius:5px;font-size:12px;color:#dbe3ee;box-shadow:0 8px 24px rgba(0,0,0,.35);animation:in .18s ease-out}
+  @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .view-pane{flex:1;overflow:auto;padding:20px 22px 70px;min-width:0}
+  .view-head{display:flex;align-items:flex-end;gap:12px;margin-bottom:14px}
+  .view-head h1{font-size:19px;margin:0;font-weight:680}
+  .view-head p{margin:2px 0 0;color:var(--dim);font-size:11px}
+  .view-head .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .panel{border:1px solid var(--line);background:var(--panel);border-radius:6px}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .panel-head strong{font-size:12px;font-weight:600}
+  .panel-head .meta{color:var(--dim);font-size:11px}
+  .split{display:grid;grid-template-columns:1.55fr .85fr;gap:14px}
+  .stat-row{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel);margin-bottom:14px}
+  .stat{padding:12px 14px;border-right:1px solid var(--line)}
+  .stat:last-child{border-right:0}
+  .stat .n{font-size:18px;font-weight:680;letter-spacing:-.02em}
+  .stat .l{color:var(--dim);font-size:10px;margin-top:2px}
+  .list-compact .mod-row{grid-template-columns:40px 1fr auto;padding:9px 12px}
+  .list-compact .thumb{width:40px;height:40px}
+  .modal-back{position:fixed;inset:0;background:rgba(4,7,12,.66);display:none;place-items:center;z-index:80;padding:20px}
+  .modal-back.open{display:grid}
+  .modal{width:640px;max-width:96vw;background:#121722;border:1px solid #2c3444;border-radius:8px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+  .modal-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .modal-head h3{margin:0;font-size:14px;font-weight:650}
+  .modal-body{padding:14px 16px;max-height:64vh;overflow:auto}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+  .plan-box{border:1px solid #2b3343;background:#0f141d;border-radius:5px;padding:10px 12px;margin:8px 0;font-size:12px}
+  .plan-box .mono{font-family:Consolas,monospace;font-size:11px;color:#a9b4c5;word-break:break-all}
+  .setting-toggle{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px}
+  .switch{width:28px;height:16px;border-radius:999px;background:#2a3242;border:1px solid #3a4558;position:relative}
+  .switch:after{content:"";position:absolute;width:10px;height:10px;border-radius:50%;background:#8a94a6;top:2px;left:2px;transition:.15s}
+  .switch.on{background:#3b2d5e;border-color:#6d4fb3}
+  .switch.on:after{left:14px;background:#c4b5fd}
+  .conflict-line{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1d232e;font-size:12px}
+  .conflict-line .path{font-family:Consolas,monospace;font-size:11px;color:#c7d2e0}
+  .conflict-line .right{margin-left:auto;color:var(--dim);font-size:10px}
+  @media (max-width:1180px){.list-pane{width:52%;min-width:390px}.detail{padding:18px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">MM</div>
+      <div><div class="brand-name">ModManager</div><div class="brand-sub">Stardew Valley · 1.6.15</div></div>
+    </div>
+    <div class="nav-label">获取</div>
+    <button class="nav-item active" data-view="discover"><span class="ico">⌕</span>发现 Mod</button>
+    <button class="nav-item" data-view="downloads"><span class="ico">↓</span>下载队列 <span class="nav-badge" id="navDownloads">1</span></button>
+    <button class="nav-item" data-view="library"><span class="ico">▤</span>本地仓库 <span class="nav-badge" id="navLibrary">6</span></button>
+    <div class="nav-label">管理</div>
+    <button class="nav-item" data-view="installed"><span class="ico">◈</span>已安装 Mod</button>
+    <button class="nav-item" data-view="conflicts"><span class="ico">⚠</span>冲突与依赖 <span class="nav-badge">2</span></button>
+    <button class="nav-item" data-view="profiles"><span class="ico">▱</span>配置档案</button>
+    <div class="sidebar-foot">
+      <div class="account"><div class="avatar">N</div><div><div style="font-size:12px">Nexus 已连接</div><small>API Key · 个人使用</small></div></div>
+      <button class="nav-item" style="margin-top:4px"><span class="ico">⚙</span>设置</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="game-select"><span class="dot"></span><select id="gameSelect"><option>Stardew Valley</option><option>Palworld</option><option>The Elder Scrolls V: Skyrim SE</option><option>Cyberpunk 2077</option></select></div>
+      <div class="seg" id="platformSeg">
+        <button class="active" data-platform="all">全部平台</button>
+        <button data-platform="nexus">Nexus</button>
+        <button data-platform="thunder">Thunderstore</button>
+        <button data-platform="github">GitHub</button>
+      </div>
+      <div class="search"><span style="color:#6f7888">⌕</span><input id="searchInput" placeholder="搜索 Mod、作者或标签   Ctrl K" /><span class="kbd">Ctrl K</span></div>
+      <div class="top-actions">
+        <span class="pill info" id="netState">在线</span>
+        <button class="btn ghost" title="刷新">↻</button>
+        <button class="btn" id="openSettings">设置</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- 发现 -->
+      <section class="view active" id="view-discover">
+        <div class="list-pane">
+          <div class="pane-head">
+            <div class="pane-title"><h1>发现 Mod</h1><span class="count" id="resultCount">128 个结果</span></div>
+            <div class="filters">
+              <button class="chip active">全部</button><button class="chip">玩法</button><button class="chip">内容</button><button class="chip">界面</button><button class="chip">工具</button><button class="chip">音频</button>
+              <span class="spacer"></span>
+              <select class="sort"><option>按相关度</option><option>按下载量</option><option>按最近更新</option></select>
+            </div>
+          </div>
+          <div class="list" id="modList"></div>
+        </div>
+        <div class="detail-pane">
+          <div class="detail" id="detail"></div>
+        </div>
+      </section>
+
+      <!-- 下载 -->
+      <section class="view" id="view-downloads">
+        <div class="view-pane">
+          <div class="view-head"><div><h1>下载队列</h1><p>下载完成后先进入本地仓库，不会写入游戏目录。</p></div><div class="right"><button class="btn sm" id="pauseAll">全部暂停</button><button class="btn sm" id="clearDone">清除已完成</button></div></div>
+          <div class="stat-row"><div class="stat"><div class="n" id="dActive">1</div><div class="l">进行中</div></div><div class="stat"><div class="n">2</div><div class="l">等待</div></div><div class="stat"><div class="n">6</div><div class="l">今日完成</div></div><div class="stat"><div class="n">18.4 MB/s</div><div class="l">当前速度</div></div></div>
+          <div class="panel"><div class="panel-head"><strong>活动任务</strong><span class="meta">最多同时 3 个</span><span class="spacer"></span><span class="setting-toggle"><span class="switch on" id="autoIngest"></span>完成后自动入库</span></div>
+            <div class="table-wrap"><table class="data"><thead><tr><th style="width:32%">Mod / 文件</th><th>来源</th><th>进度</th><th>速度</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody id="downloadRows"></tbody></table></div>
+          </div>
+          <div class="section-title">下载历史</div>
+          <div class="panel"><div class="table-wrap"><table class="data"><thead><tr><th>Mod</th><th>来源</th><th>版本</th><th>完成时间</th><th>校验</th><th>仓库位置</th></tr></thead><tbody>
+            <tr><td>Stardew Valley Expanded</td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>1.15.7</td><td>今天 14:20</td><td><span class="pill ok">SHA-256 已验证</span></td><td><span class="pill neutral">已入库</span></td></tr>
+            <tr><td>Automate</td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>2.0.2</td><td>今天 14:12</td><td><span class="pill ok">SHA-256 已验证</span></td><td><span class="pill neutral">已入库</span></td></tr>
+            <tr><td>Lookup Anything</td><td><span class="source"><i class="src-dot thunder"></i>Thunderstore</span></td><td>1.45.0</td><td>昨天 21:08</td><td><span class="pill warn">来源未提供哈希</span></td><td><span class="pill neutral">已入库</span></td></tr>
+          </tbody></table></div></div>
+        </div>
+      </section>
+
+      <!-- 仓库 -->
+      <section class="view" id="view-library">
+        <div class="view-pane">
+          <div class="view-head"><div><h1>本地仓库</h1><p>所有平台的原始压缩包都保存在这里，安装只读取仓库，不读取下载缓存。</p></div><div class="right"><button class="btn sm" id="importBtn">导入压缩包</button><button class="btn sm" id="verifyAll">校验全部</button></div></div>
+          <div class="stat-row"><div class="stat"><div class="n">6</div><div class="l">包总数</div></div><div class="stat"><div class="n">6</div><div class="l">可用</div></div><div class="stat"><div class="n">0</div><div class="l">损坏 / 缺失</div></div><div class="stat"><div class="n">1.24 GB</div><div class="l">占用空间</div></div></div>
+          <div class="panel"><div class="panel-head"><strong>全部包</strong><span class="meta">按游戏筛选：Stardew Valley</span><span class="spacer"></span><input placeholder="在仓库中搜索" style="background:#0f141d;border:1px solid #2c3444;border-radius:4px;padding:4px 8px;font-size:11px;width:180px" /></div>
+            <div class="table-wrap"><table class="data"><thead><tr><th>包</th><th>来源</th><th>版本 / 文件</th><th>大小</th><th>校验</th><th>入库时间</th><th style="text-align:right">操作</th></tr></thead><tbody id="libraryRows">
+              <tr><td><strong>Stardew Valley Expanded</strong><div class="mod-sub">FlashShifter · 内容扩展</div></td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>1.15.7 <span class="dotsep">·</span> file 512345</td><td>184 MB</td><td><span class="pill ok">SHA-256 已验证</span></td><td>今天 14:20</td><td><div class="row-actions"><button class="btn sm">查看</button><button class="btn sm primary" data-install="Stardew Valley Expanded">安装</button></div></td></tr>
+              <tr><td><strong>Automate</strong><div class="mod-sub">Pathoschild · 工具</div></td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>2.0.2 <span class="dotsep">·</span> file 498001</td><td>1.2 MB</td><td><span class="pill ok">SHA-256 已验证</span></td><td>今天 14:12</td><td><div class="row-actions"><button class="btn sm">查看</button><button class="btn sm primary" data-install="Automate">安装</button></div></td></tr>
+              <tr><td><strong>Lookup Anything</strong><div class="mod-sub">Pathoschild · 界面</div></td><td><span class="source"><i class="src-dot thunder"></i>Thunderstore</span></td><td>1.45.0 <span class="dotsep">·</span> latest</td><td>890 KB</td><td><span class="pill warn">无来源哈希</span></td><td>昨天 21:08</td><td><div class="row-actions"><button class="btn sm">查看</button><button class="btn sm primary" data-install="Lookup Anything">安装</button></div></td></tr>
+              <tr><td><strong>SMAPI</strong><div class="mod-sub">Pathoschild · 运行环境</div></td><td><span class="source"><i class="src-dot github"></i>GitHub</span></td><td>4.1.10 <span class="dotsep">·</span> release</td><td>12.6 MB</td><td><span class="pill ok">SHA-256 已验证</span></td><td>昨天 20:54</td><td><div class="row-actions"><button class="btn sm">查看</button><button class="btn sm" data-install="SMAPI">安装环境</button></div></td></tr>
+              <tr><td><strong>本地导入 · BetterChests</strong><div class="mod-sub">用户导入 · 未知作者</div></td><td><span class="source"><i class="src-dot local"></i>本地</span></td><td>未声明 <span class="dotsep">·</span> local:a1b2</td><td>4.1 MB</td><td><span class="pill ok">SHA-256 已验证</span></td><td>11 月 6 日</td><td><div class="row-actions"><button class="btn sm">查看</button><button class="btn sm primary" data-install="BetterChests">安装</button></div></td></tr>
+            </tbody></table></div></div>
+          <div class="note">仓库中的文件按 <span style="font-family:Consolas,monospace;color:#c4b5fd">Library/packages/&lt;平台&gt;/&lt;游戏&gt;/&lt;Mod&gt;/&lt;版本&gt;__&lt;文件&gt;/archive.zip</span> 存放；同一压缩包只保存一次，重复下载按 SHA-256 跳过。</div>
+        </div>
+      </section>
+
+      <!-- 已安装 -->
+      <section class="view" id="view-installed">
+        <div class="view-pane">
+          <div class="view-head"><div><h1>已安装 Mod</h1><p>Stardew Valley · 当前档案 “Cozy Farm” · 安装位置已通过路径安全检查。</p></div><div class="right"><button class="btn sm">打开游戏目录</button><button class="btn sm primary" id="installFromLibrary">从仓库安装</button></div></div>
+          <div class="stat-row"><div class="stat"><div class="n">14</div><div class="l">已安装</div></div><div class="stat"><div class="n">12</div><div class="l">已启用</div></div><div class="stat"><div class="n">1</div><div class="l">需要更新</div></div><div class="stat"><div class="n" style="color:#fbbf24">1</div><div class="l">缺少前置</div></div></div>
+          <div class="panel"><div class="panel-head"><strong>已安装</strong><span class="meta">按名称排序</span><span class="spacer"></span><span class="setting-toggle"><span class="switch on"></span>只显示已启用</span></div>
+            <div class="table-wrap"><table class="data"><thead><tr><th>Mod</th><th>来源</th><th>版本</th><th>安装位置</th><th>依赖</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>
+              <tr><td><strong>Stardew Valley Expanded</strong><div class="mod-sub">FlashShifter</div></td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>1.15.7</td><td><span class="mono" style="font-family:Consolas,monospace;font-size:10px;color:#9aa3b2">Mods/StardewValleyExpanded</span></td><td><span class="pill ok">已满足</span></td><td><span class="pill ok">已启用</span></td><td><div class="row-actions"><button class="btn sm">禁用</button><button class="btn sm">卸载</button></div></td></tr>
+              <tr><td><strong>Automate</strong><div class="mod-sub">Pathoschild</div></td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>2.0.2</td><td><span class="mono" style="font-family:Consolas,monospace;font-size:10px;color:#9aa3b2">Mods/Automate</span></td><td><span class="pill ok">已满足</span></td><td><span class="pill ok">已启用</span></td><td><div class="row-actions"><button class="btn sm">禁用</button><button class="btn sm">卸载</button></div></td></tr>
+              <tr><td><strong>Lookup Anything</strong><div class="mod-sub">Pathoschild</div></td><td><span class="source"><i class="src-dot thunder"></i>Thunderstore</span></td><td>1.45.0</td><td><span class="mono" style="font-family:Consolas,monospace;font-size:10px;color:#9aa3b2">Mods/LookupAnything</span></td><td><span class="pill ok">已满足</span></td><td><span class="pill ok">已启用</span></td><td><div class="row-actions"><button class="btn sm">禁用</button><button class="btn sm">卸载</button></div></td></tr>
+              <tr><td><strong>Farm Type Manager</strong><div class="mod-sub">Esca</div></td><td><span class="source"><i class="src-dot"></i>Nexus</span></td><td>1.18.0</td><td><span class="mono" style="font-family:Consolas,monospace;font-size:10px;color:#9aa3b2">Mods/FarmTypeManager</span></td><td><span class="pill warn">缺少 Content Patcher</span></td><td><span class="pill warn">需要处理</span></td><td><div class="row-actions"><button class="btn sm">修复</button><button class="btn sm">卸载</button></div></td></tr>
+            </tbody></table></div></div>
+          <div class="note warn">Farm Type Manager 声明的必需前置 <strong>Content Patcher ≥ 2.4.0</strong> 尚未安装或版本过低。可在“依赖与冲突”中查看来源并加入下载队列。</div>
+        </div>
+      </section>
+
+      <!-- 冲突 -->
+      <section class="view" id="view-conflicts">
+        <div class="view-pane">
+          <div class="view-head"><div><h1>冲突与依赖</h1><p>只报告可解释的冲突；文件重叠不一定是错误。</p></div><div class="right"><button class="btn sm">重新扫描</button></div></div>
+          <div class="split">
+            <div class="panel"><div class="panel-head"><strong>文件覆盖</strong><span class="meta">2 处</span></div><div style="padding:2px 14px">
+              <div class="conflict-line"><span class="pill warn">覆盖</span><span class="path">assets/Data/Objects.json</span><span class="right">Stardew Valley Expanded → 覆盖 Automate 的补丁</span></div>
+              <div class="conflict-line"><span class="pill info">可合并</span><span class="path">i18n/zh-CN.json</span><span class="right">两个 Mod 都提供翻译，安装计划保留前者</span></div>
+              <div class="conflict-line"><span class="pill err">阻断</span><span class="path">StardewModdingAPI.exe</span><span class="right">目标被另一个 Mod 占用；需要先卸载</span></div>
+            </div></div>
+            <div class="panel"><div class="panel-head"><strong>依赖状态</strong></div><div style="padding:2px 14px">
+              <div class="dep-row"><div><div class="name">Content Patcher</div><div class="ver">必需 · ≥ 2.4.0</div></div><div class="right"><span class="pill warn">缺失</span><button class="btn sm" data-queue="Content Patcher">下载</button></div></div>
+              <div class="dep-row"><div><div class="name">SMAPI</div><div class="ver">运行环境 · ≥ 4.1.0</div></div><div class="right"><span class="pill ok">4.1.10</span></div></div>
+              <div class="dep-row"><div><div class="name">Farm Type Manager</div><div class="ver">可选 · 任意版本</div></div><div class="right"><span class="pill info">已安装</span></div></div>
+            </div></div>
+          </div>
+          <div class="section-title">安装计划预览</div>
+          <div class="panel" style="padding:14px"><div class="plan-box"><div><strong>Stardew Valley Expanded</strong> → <span class="mono">C:\Program Files (x86)\Steam\steamapps\common\Stardew Valley</span></div><div style="margin-top:8px;color:#9aa3b2">将写入 214 个文件 · 新增 198 · 覆盖 16 · 备份 16 · 预计 184 MB</div><div style="margin-top:8px;color:#fbbf24">1 个阻断冲突需要先处理；不会写入任何文件，直到你确认。</div></div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="confirmInstall">确认安装</button><button class="btn">取消</button></div></div>
+        </div>
+      </section>
+
+      <!-- 档案 -->
+      <section class="view" id="view-profiles">
+        <div class="view-pane">
+          <div class="view-head"><div><h1>配置档案</h1><p>同一个包可以安装到多个档案，不需要重复下载。</p></div><div class="right"><button class="btn sm primary">新建档案</button></div></div>
+          <div class="panel"><div class="table-wrap"><table class="data"><thead><tr><th>档案</th><th>游戏</th><th>Mod 数</th><th>最后使用</th><th>状态</th><th style="text-align:right">操作</th></tr></thead><tbody>
+            <tr><td><strong>Cozy Farm</strong><div class="mod-sub">默认 · 当前</div></td><td>Stardew Valley</td><td>14</td><td>今天 14:22</td><td><span class="pill ok">使用中</span></td><td><div class="row-actions"><button class="btn sm">复制</button><button class="btn sm">导出</button></div></td></tr>
+            <tr><td><strong>Vanilla+</strong><div class="mod-sub">轻量</div></td><td>Stardew Valley</td><td>4</td><td>11 月 5 日</td><td><span class="pill neutral">未启用</span></td><td><div class="row-actions"><button class="btn sm">切换</button><button class="btn sm">导出</button></div></td></tr>
+            <tr><td><strong>Palworld Coop</strong><div class="mod-sub">专用服务器</div></td><td>Palworld</td><td>9</td><td>11 月 3 日</td><td><span class="pill neutral">未启用</span></td><td><div class="row-actions"><button class="btn sm">切换</button><button class="btn sm">导出</button></div></td></tr>
+          </tbody></table></div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="dock"><span class="mini">下载</span><span class="mini" id="dockText">1 个进行中 · 2 个等待</span><div class="bar progress"><i style="width:42%" id="dockBar"></i></div><span class="mini" id="dockPct">42%</span><span class="grow"></span><button class="btn sm" data-view="downloads">打开队列</button></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-back" id="modalBack">
+  <div class="modal">
+    <div class="modal-head"><h3 id="modalTitle">安装方案</h3><span class="spacer"></span><button class="btn sm" id="modalClose">关闭</button></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot"><button class="btn" id="modalCancel">取消</button><button class="btn primary" id="modalOk">确认安装</button></div>
+  </div>
+</div>
+
+<script>
+const MODS = [
+  {id:"sve",name:"Stardew Valley Expanded",author:"FlashShifter",platform:"nexus",version:"1.15.7",updated:"2 天前",downloads:"3.2M",size:"184 MB",category:"内容扩展",summary:"在原版基础上扩展农场、NPC、事件与地图，保留原作节奏。",tags:["内容","地图","NPC"],deps:[{name:"Content Patcher",ver:"≥ 2.4.0",state:"ok"},{name:"SMAPI",ver:"≥ 4.1.0",state:"ok"},{name:"Farm Type Manager",ver:"可选",state:"ok"}]},
+  {id:"automate",name:"Automate",author:"Pathoschild",platform:"nexus",version:"2.0.2",updated:"5 天前",downloads:"1.8M",size:"1.2 MB",category:"工具",summary:"把箱子、机器与收集器连成自动化生产线，减少重复操作。",tags:["自动化","效率"],deps:[{name:"SMAPI",ver:"≥ 3.18.0",state:"ok"}]},
+  {id:"lookup",name:"Lookup Anything",author:"Pathoschild",platform:"thunder",version:"1.45.0",updated:"1 周前",downloads:"980K",size:"890 KB",category:"界面",summary:"按 F1 查看任何角色、物品、作物或动物的详细信息。",tags:["信息","界面"],deps:[{name:"SMAPI",ver:"≥ 3.18.0",state:"ok"}]},
+  {id:"ftm",name:"Farm Type Manager",author:"Esca",platform:"nexus",version:"1.18.0",updated:"3 天前",downloads:"640K",size:"4.1 MB",category:"工具",summary:"按区域生成采集物、怪物与大型资源，支持自定义生成规则。",tags:["生成","工具"],deps:[{name:"Content Patcher",ver:"≥ 2.4.0",state:"missing"},{name:"SMAPI",ver:"≥ 4.0.0",state:"ok"}]},
+  {id:"chests",name:"Better Chests",author:"Local Import",platform:"local",version:"未声明",updated:"11 月 6 日",downloads:"—",size:"4.1 MB",category:"本地导入",summary:"本地导入的压缩包。安装前需要确认 Mod 根目录与目标位置。",tags:["本地","待分析"],deps:[{name:"未知",ver:"未声明",state:"unknown"}]},
+  {id:"smapi",name:"SMAPI",author:"Pathoschild",platform:"github",version:"4.1.10",updated:"2 周前",downloads:"—",size:"12.6 MB",category:"运行环境",summary:"Stardew Valley 的 Mod 加载器。安装环境会写入游戏根目录并备份被替换的文件。",tags:["Loader","运行环境"],deps:[]}
+];
+const state = {selected:"sve",platform:"all",query:"",view:"discover",downloads:[
+  {id:"d1",name:"Stardew Valley Expanded",file:"StardewValleyExpanded-1.15.7.zip",platform:"nexus",progress:42,speed:"8.4 MB/s",status:"downloading",size:"184 MB"},
+  {id:"d2",name:"Automate",file:"Automate-2.0.2.zip",platform:"nexus",progress:0,speed:"—",status:"queued",size:"1.2 MB"},
+  {id:"d3",name:"Content Patcher",file:"ContentPatcher-2.4.0.zip",platform:"nexus",progress:0,speed:"—",status:"queued",size:"2.8 MB"}
+]};
+
+const $ = (s,el=document)=>el.querySelector(s);
+const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
+const platformLabel = p => ({nexus:"Nexus",thunder:"Thunderstore",github:"GitHub",local:"本地"}[p]||"其他");
+const platformClass = p => p==="thunder"?"thunder":p==="github"?"github":p==="local"?"local":"";
+const pill = (t,c="neutral")=>`<span class="pill ${c}">${t}</span>`;
+
+function toast(msg){const d=document.createElement("div");d.textContent=msg;$("#toast").appendChild(d);setTimeout(()=>d.remove(),3200);}
+
+function renderList(){
+  const q=state.query.toLowerCase();
+  const rows=MODS.filter(m=>{
+    const p=state.platform==="all"||m.platform===state.platform;
+    const t=!q||[m.name,m.author,m.summary,...m.tags].join(" ").toLowerCase().includes(q);
+    return p&&t;
+  });
+  $("#resultCount").textContent=`${rows.length} 个结果`;
+  $("#modList").innerHTML=rows.map(m=>`
+    <div class="mod-row ${m.id===state.selected?"selected":""}" data-mod="${m.id}" tabindex="0">
+      <div class="thumb" aria-hidden="true"></div>
+      <div class="mod-main">
+        <div class="mod-title"><strong>${m.name}</strong>${m.platform==="local"?pill("本地","neutral"):""}</div>
+        <div class="mod-sub">${m.author} <span class="dotsep">·</span> ${m.summary}</div>
+        <div class="mod-tags"><span class="tag platform ${platformClass(m.platform)}">${platformLabel(m.platform)}</span><span class="tag">${m.category}</span>${m.tags.slice(0,2).map(t=>`<span class="tag">${t}</span>`).join("")}</div>
+      </div>
+      <div class="mod-meta">v${m.version}<br><span style="color:#5e6777">${m.updated}</span></div>
+    </div>`).join("");
+  $$("#modList .mod-row").forEach(el=>el.addEventListener("click",()=>{state.selected=el.dataset.mod;renderList();renderDetail();}));
+}
+
+function renderDetail(){
+  const m=MODS.find(x=>x.id===state.selected)||MODS[0];
+  const deps=m.deps.map(d=>{
+    const c=d.state==="ok"?"ok":d.state==="missing"?"warn":"neutral";
+    const label=d.state==="ok"?"已满足":d.state==="missing"?"缺失":"未知";
+    const action=d.state==="missing"?`<button class="btn sm" data-queue="${d.name}">加入下载</button>`:"";
+    return `<div class="dep-row"><div><div class="name">${d.name}</div><div class="ver">${d.ver}</div></div><div class="right">${pill(label,c)}${action}</div></div>`;
+  }).join("");
+  const files=[
+    {v:m.version,file:`${m.id}-${m.version}.zip`,size:m.size,date:m.updated,primary:true},
+    {v:"可选文件",file:`${m.id}-optional-assets.zip`,size:"22 MB",date:"3 周前",primary:false}
+  ];
+  $("#detail").innerHTML=`
+    <div class="detail-head">
+      <div class="cover" aria-hidden="true"></div>
+      <div>
+        <h2>${m.name}</h2>
+        <div class="byline">by <a href="#">${m.author}</a> <span class="dotsep">·</span> ${platformLabel(m.platform)} <span class="dotsep">·</span> 更新于 ${m.updated}</div>
+        <div class="mod-tags" style="margin-top:8px"><span class="tag platform ${platformClass(m.platform)}">${platformLabel(m.platform)}</span><span class="tag">${m.category}</span>${m.tags.map(t=>`<span class="tag">${t}</span>`).join("")}</div>
+        <div class="detail-actions">
+          <button class="btn primary" id="downloadBtn">下载到本地仓库</button>
+          <button class="btn">查看原页 ↗</button>
+          <button class="btn ghost" title="收藏">☆</button>
+        </div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div class="kv"><span class="k">版本</span><span class="v">${m.version}</span></div>
+      <div class="kv"><span class="k">文件大小</span><span class="v">${m.size}</span></div>
+      <div class="kv"><span class="k">下载量</span><span class="v">${m.downloads}</span></div>
+      <div class="kv"><span class="k">游戏</span><span class="v">Stardew Valley</span></div>
+      <div class="kv"><span class="k">安装方式</span><span class="v">${m.platform==="github"?"Loader 分发包":"SMAPI Mod"}</span></div>
+      <div class="kv"><span class="k">仓库状态</span><span class="v">${m.id==="chests"?"已入库":"未下载"}</span></div>
+    </div>
+    <div class="tabs"><button class="tab active" data-tab="about">简介</button><button class="tab" data-tab="files">文件与版本</button><button class="tab" data-tab="deps">依赖 (${m.deps.length})</button></div>
+    <div class="tab-panel active" id="tab-about"><div class="prose"><p>${m.summary}</p><p>这个页面展示的是翻译后的名称与简介；原始内容保留在下方，可随时展开查看。</p><p>安装前会先生成安装计划，列出目标目录、将被覆盖的文件、缺失前置和冲突。下载和安装是两个独立动作。</p></div><details class="original"><summary>查看平台原始信息（英文）</summary><p style="margin:8px 0 0">${m.summary}</p></details></div>
+    <div class="tab-panel" id="tab-files"><table class="files"><thead><tr><th>版本</th><th>文件</th><th>大小</th><th>上传</th><th>状态</th><th></th></tr></thead><tbody>${files.map(f=>`<tr><td>${f.v} ${f.primary?pill("主文件","info"):""}</td><td style="font-family:Consolas,monospace;font-size:11px">${f.file}</td><td>${f.size}</td><td>${f.date}</td><td>${pill("可下载","ok")}</td><td style="text-align:right"><button class="btn sm" data-queue="${m.name}">下载</button></td></tr>`).join("")}</tbody></table><div class="note">Nexus 文件是否允许管理器直接下载由平台和作者设置决定；不支持时会打开原页，不会绕过权限。</div></div>
+    <div class="tab-panel" id="tab-deps"><div>${deps||'<div class="empty">没有声明依赖。这不等于“无依赖”，安装前仍会做结构分析。</div>'}</div><div class="note">依赖状态来自平台声明与本地 Manifest 的合并结果；“未知”与“无依赖”分开显示。</div></div>
+  `;
+  $$("#detail .tab").forEach(t=>t.addEventListener("click",()=>{$$("#detail .tab").forEach(x=>x.classList.remove("active"));t.classList.add("active");$$("#detail .tab-panel").forEach(p=>p.classList.remove("active"));$("#tab-"+t.dataset.tab).classList.add("active");}));
+  $("#downloadBtn").addEventListener("click",()=>queueDownload(m));
+  $$("#detail [data-queue]").forEach(b=>b.addEventListener("click",()=>queueDownload(MODS.find(x=>x.name===b.dataset.queue)||{name:b.dataset.queue,platform:"nexus",version:"latest",size:"—"})));
+}
+
+function queueDownload(m){
+  if(state.downloads.some(d=>d.name===m.name&&d.status!=="done")){toast("已经在下载队列中");return;}
+  const platform=m.platform||"nexus";
+  const version=m.version||"latest";
+  const size=m.size||"—";
+  state.downloads.unshift({id:"d"+Date.now(),name:m.name,file:`${m.name.replace(/\s+/g,"")}-${version}.zip`,platform,progress:0,speed:"—",status:"queued",size});
+  toast(`已加入下载队列：${m.name}`);
+  renderDownloads();updateDock();
+}
+
+function renderDownloads(){
+  const rows=state.downloads;
+  $("#downloadRows").innerHTML=rows.map(d=>{
+    const status=d.status==="downloading"?pill("下载中","info"):d.status==="paused"?pill("已暂停","warn"):d.status==="done"?pill("已入库","ok"):d.status==="failed"?pill("失败","err"):pill("等待","neutral");
+    const actions=d.status==="done"?`<button class="btn sm primary" data-install="${d.name}">安装</button>`:
+      d.status==="downloading"?`<button class="btn sm" data-pause="${d.id}">暂停</button><button class="btn sm" data-cancel="${d.id}">取消</button>`:
+      d.status==="paused"?`<button class="btn sm" data-resume="${d.id}">继续</button><button class="btn sm" data-cancel="${d.id}">取消</button>`:
+      `<button class="btn sm" data-cancel="${d.id}">取消</button>`;
+    return `<tr><td><strong>${d.name}</strong><div class="mod-sub" style="font-family:Consolas,monospace;font-size:10px">${d.file}</div></td><td><span class="source"><i class="src-dot ${platformClass(d.platform)}"></i>${platformLabel(d.platform)}</span></td><td><div style="display:flex;align-items:center;gap:8px"><div class="progress" style="flex:1"><i style="width:${d.progress}%"></i></div><span style="font-size:10px;color:#8b94a5;min-width:32px">${d.progress}%</span></div><div class="mod-sub">${d.size}</div></td><td style="color:#9aa3b2">${d.speed}</td><td>${status}</td><td><div class="row-actions">${actions}</div></td></tr>`;
+  }).join("");
+  $$("#downloadRows [data-pause]").forEach(b=>b.onclick=()=>{const d=state.downloads.find(x=>x.id===b.dataset.pause);d.status="paused";d.speed="—";renderDownloads();updateDock();});
+  $$("#downloadRows [data-resume]").forEach(b=>b.onclick=()=>{const d=state.downloads.find(x=>x.id===b.dataset.resume);d.status="downloading";d.speed="6.1 MB/s";renderDownloads();updateDock();});
+  $$("#downloadRows [data-cancel]").forEach(b=>b.onclick=()=>{state.downloads=state.downloads.filter(x=>x.id!==b.dataset.cancel);renderDownloads();updateDock();});
+  $$("#downloadRows [data-install]").forEach(b=>b.onclick=()=>openInstall(b.dataset.install));
+  $("#navDownloads").textContent=state.downloads.filter(d=>d.status!=="done").length;
+}
+
+function updateDock(){
+  const active=state.downloads.filter(d=>d.status==="downloading").length;
+  const queued=state.downloads.filter(d=>d.status==="queued").length;
+  const d=state.downloads.find(x=>x.status==="downloading")||state.downloads[0];
+  $("#dockText").textContent=`${active} 个进行中 · ${queued} 个等待`;
+  $("#dockBar").style.width=(d?d.progress:0)+"%";
+  $("#dockPct").textContent=(d?d.progress:0)+"%";
+  $("#dActive").textContent=active;
+}
+
+function openInstall(name){
+  const m=MODS.find(x=>x.name===name)||{name,version:"—"};
+  $("#modalTitle").textContent="安装方案 · "+m.name;
+  $("#modalBody").innerHTML=`
+    <div class="plan-box"><div><strong>目标游戏</strong> Stardew Valley <span class="dotsep">·</span> 档案 Cozy Farm</div><div style="margin-top:6px"><strong>安装目录</strong><div class="mono">C:\\Program Files (x86)\\Steam\\steamapps\\common\\Stardew Valley\\Mods\\${m.name.replace(/\s+/g,"")}</div></div></div>
+    <div class="section-title" style="margin-top:12px">将执行</div>
+    <div class="prose" style="font-size:12px"><p>解压 214 个文件 · 新增 198 · 覆盖 16 · 备份 16。安装完成后写入文件归属清单，支持安全卸载与回滚。</p></div>
+    <div class="note warn">检测到 1 个缺失前置：<strong>Content Patcher ≥ 2.4.0</strong>。可以继续安装，但 Mod 可能无法运行。</div>
+    <div class="section-title">冲突</div>
+    <div class="conflict-line"><span class="pill warn">覆盖</span><span class="path">assets/Data/Objects.json</span><span class="right">与 Automate 重叠 · 安装计划保留本 Mod</span></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;color:#9aa3b2;font-size:11px"><input type="checkbox" id="installAnyway" /> 我已确认目标目录与覆盖行为</label>`;
+  $("#modalBack").classList.add("open");
+  $("#modalOk").onclick=()=>{
+    if(!$("#installAnyway").checked){toast("请先确认目标目录与覆盖行为");return;}
+    $("#modalBack").classList.remove("open");
+    toast(`${m.name} 已加入安装队列；安装完成后可启用或回滚`);
+    addInstalled(m.name);
+  };
+}
+
+function addInstalled(name){
+  const m=MODS.find(x=>x.name===name)||{name,platform:"local",version:"—"};
+  const tbody=document.querySelector("#view-installed tbody");
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td><strong>${m.name}</strong><div class="mod-sub">${m.author||"本地导入"}</div></td><td><span class="source"><i class="src-dot ${platformClass(m.platform)}"></i>${platformLabel(m.platform)}</span></td><td>${m.version}</td><td><span style="font-family:Consolas,monospace;font-size:10px;color:#9aa3b2">Mods/${m.name.replace(/\s+/g,"")}</span></td><td><span class="pill ok">已满足</span></td><td><span class="pill ok">已启用</span></td><td><div class="row-actions"><button class="btn sm">禁用</button><button class="btn sm">卸载</button></div></td>`;
+  tbody.prepend(tr);
+}
+
+function switchView(v){
+  state.view=v;
+  $$(".nav-item[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===v));
+  $$(".view").forEach(s=>s.classList.toggle("active",s.id==="view-"+v));
+  if(v==="downloads")renderDownloads();
+}
+
+$$(".nav-item[data-view], .dock [data-view]").forEach(b=>b.addEventListener("click",()=>switchView(b.dataset.view)));
+$$("#platformSeg button").forEach(b=>b.addEventListener("click",()=>{state.platform=b.dataset.platform;$$("#platformSeg button").forEach(x=>x.classList.remove("active"));b.classList.add("active");renderList();}));
+$("#searchInput").addEventListener("input",e=>{state.query=e.target.value;renderList();});
+document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();$("#searchInput").focus();}});
+$$("#libraryRows [data-install]").forEach(b=>b.addEventListener("click",()=>openInstall(b.dataset.install)));
+$("#modalClose").onclick=$("#modalCancel").onclick=()=>$("#modalBack").classList.remove("open");
+$("#modalBack").addEventListener("click",e=>{if(e.target.id==="modalBack")$("#modalBack").classList.remove("open");});
+$("#installFromLibrary").onclick=()=>switchView("library");
+$("#importBtn").onclick=()=>toast("导入压缩包：选择 ZIP / 7Z / RAR 后会先入库并计算 SHA-256");
+$("#verifyAll").onclick=()=>toast("正在校验仓库中的 6 个包…");
+$("#pauseAll").onclick=()=>{state.downloads.forEach(d=>{if(d.status==="downloading")d.status="paused"});renderDownloads();updateDock();toast("已暂停全部活动下载");};
+$("#clearDone").onclick=()=>{state.downloads=state.downloads.filter(d=>d.status!=="done");renderDownloads();updateDock();};
+$("#autoIngest").onclick=()=>{const on=$("#autoIngest").classList.toggle("on");toast(on?"下载完成后自动入库已开启":"已关闭自动入库；需要手动提交到仓库");};
+$("#openSettings").onclick=()=>toast("设置：平台账号 / 下载并发 / 仓库位置 / 翻译");
+$("#confirmInstall").onclick=()=>openInstall("Stardew Valley Expanded");
+
+// simulate progress
+setInterval(()=>{
+  let changed=false;
+  state.downloads.forEach(d=>{
+    if(d.status==="downloading"){
+      d.progress=Math.min(100,d.progress+Math.floor(Math.random()*4)+1);
+      d.speed=(6+Math.random()*4).toFixed(1)+" MB/s";
+      if(d.progress>=100){d.status="done";d.speed="—";changed=true;toast(`下载完成：${d.name} 已进入本地仓库`);}
+    }
+  });
+  if(changed||state.downloads.some(d=>d.status==="downloading")){renderDownloads();updateDock();}
+},900);
+
+renderList();renderDetail();renderDownloads();updateDock();
+</script>
+</body>
+</html>

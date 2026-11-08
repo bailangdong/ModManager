@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    TranslationSmoke: a headless end-to-end verification of the real, free, local English → Chinese engine.
+
+    Like SmokeRun, it is deliberately NOT part of the solution build: it is the "actually run it and read the
+    Chinese that came back" check that a unit test cannot honestly provide. It never writes outside the
+    repository, and it never touches a game folder.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ModManager.TranslationSmoke</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ModManager.Core\ModManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

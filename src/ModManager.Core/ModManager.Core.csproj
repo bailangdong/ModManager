@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ModManager.Core — the engine.
+
+    Dependency rule, taken from Modrix's charter ("modrix-core depends on no UI, site-specific, or
+    protocol crate"): this project must never reference WPF, Windows Forms, or any UI package. That is
+    what keeps the engine testable without a message pump and what would let a CLI or a service host
+    reuse it unchanged.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ModManager.Core</RootNamespace>
+    <AssemblyName>ModManager.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      One third-party dependency, added deliberately: SharpCompress provides mature, maintained
+      7z and RAR decoding for .NET 8. The engine still avoids packages for everything the BCL
+      covers (zip/tar via System.IO.Compression, JSON via System.Text.Json, hardlinks via a
+      single P/Invoke in FileSystemOps). Implementing 7z/RAR ourselves is explicitly out of
+      scope — the user's spec forbids hand-rolling compression algorithms.
+    -->
+    <PackageReference Include="SharpCompress" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The local translation worker. It is embedded rather than copied to the output directory so it cannot
+      be lost, edited or left behind by a stale build: the engine writes it out of the assembly into its
+      runtime folder at initialisation, which keeps one source of truth for the script the WPF process runs.
+      See Services/LocalTranslation/LocalArgosTranslationEngine.cs.
+    -->
+    <EmbeddedResource Include="Services\LocalTranslation\engine_worker.py" />
+  </ItemGroup>
+
+</Project>

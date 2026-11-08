@@ -1,0 +1,626 @@
+<!--
+  Mods page, with the installation preview.
+
+  The preview is the centrepiece: because the engine's planner is a pure function, the list below IS the
+  install plan rather than an estimate of it. Every source-to-target row carries a safety badge, and any
+  path the safety gate refused is listed separately with its reason — so a refusal is explained before
+  anything is written instead of surfacing as an exception halfway through.
+
+  Visual hierarchy: page title 22, card/section titles 15 (SubtitleText), body 13, helper text 12
+  (CaptionText). The Mod list is the protagonist; the right pane is a quiet detail surface. Inside a card,
+  field labels stay at 12 semibold instead of competing with the card title.
+-->
+<UserControl x:Class="ModManager.App.Views.ModsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModManager.App.Views"
+             Background="Transparent"
+             FontFamily="{StaticResource UiFont}">
+  <UserControl.Resources>
+    <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:BrushPassThroughConverter x:Key="BrushPass" />
+  </UserControl.Resources>
+
+  <Grid Margin="{StaticResource PagePadding}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- ===== Header ===== -->
+    <Grid Grid.Row="0" Margin="0,0,0,14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel Grid.Column="0" VerticalAlignment="Center">
+        <TextBlock Text="Mod 管理" Style="{StaticResource PageTitleText}" />
+        <TextBlock Text="{Binding Status}" Style="{StaticResource PageSubtitleText}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" />
+      </StackPanel>
+
+      <Button Grid.Column="1"
+              Style="{StaticResource PrimaryButton}"
+              Content="从压缩包安装…"
+              VerticalAlignment="Center"
+              Command="{Binding InstallFromArchiveCommand}" />
+    </Grid>
+
+    <!-- ===== Filter bar ===== -->
+    <Grid Grid.Row="1" Margin="0,0,0,10">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="220" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <!-- A page-local watermark, layered over the text box: the AppTextBox template is shell-owned. -->
+      <Grid Grid.Column="0" Margin="0,0,10,0">
+        <TextBox Style="{StaticResource AppTextBox}"
+                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                 ToolTip="按名称 / 作者 / 版本搜索" />
+        <TextBlock Text="搜索名称 / 作者 / 版本"
+                   Style="{StaticResource CaptionText}"
+                   Foreground="{DynamicResource TextDisabledBrush}"
+                   VerticalAlignment="Center"
+                   Margin="13,0,0,0"
+                   IsHitTestVisible="False"
+                   TextWrapping="NoWrap"
+                   Visibility="{Binding SearchText, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+      </Grid>
+
+      <ComboBox Grid.Column="1"
+                Style="{StaticResource AppComboBox}"
+                ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                MinWidth="120"
+                Margin="0,0,10,0"
+                SelectedItem="{Binding StateFilter, Mode=TwoWay}">
+        <ComboBoxItem Content="全部" />
+        <ComboBoxItem Content="已启用" />
+        <ComboBoxItem Content="已禁用" />
+        <ComboBoxItem Content="未部署" />
+        <ComboBoxItem Content="有冲突" />
+        <ComboBoxItem Content="有更新" />
+      </ComboBox>
+
+      <ComboBox Grid.Column="2"
+                Style="{StaticResource AppComboBox}"
+                ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                MinWidth="130"
+                Margin="0,0,12,0"
+                SelectedItem="{Binding SortKey, Mode=TwoWay}">
+        <ComboBoxItem Content="按名称" />
+        <ComboBoxItem Content="按安装时间" />
+        <ComboBoxItem Content="按大小" />
+        <ComboBoxItem Content="按状态" />
+      </ComboBox>
+
+      <TextBlock Grid.Column="3"
+                 Text="{Binding FilterSummary}"
+                 Style="{StaticResource CaptionText}"
+                 VerticalAlignment="Center"
+                 TextWrapping="NoWrap" />
+    </Grid>
+
+    <!-- ===== Body: mod list, detail, preview ===== -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <!--
+          The list takes the remaining space; the detail pane is a fixed, narrow column. A star-sized
+          pane was the earlier mistake: its content is wide enough that the pair could exceed the
+          viewport and clip the pane off the right edge.
+        -->
+        <ColumnDefinition Width="*" MinWidth="360" />
+        <ColumnDefinition Width="400" />
+      </Grid.ColumnDefinitions>
+
+      <!--
+        Flat rows, matching the Nexus browser. A rounded card per mod turned a 200-mod library into 200
+        floating boxes; TableRow keeps one continuous list with separators and a readable selected state.
+      -->
+      <ListBox Grid.Column="0"
+               Style="{StaticResource AppListBox}"
+               ItemContainerStyle="{StaticResource TableRow}"
+               ItemsSource="{Binding FilteredMods}"
+               SelectedItem="{Binding SelectedMod, Mode=TwoWay}">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Border Padding="12,10">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Icon tile: one character from the mod's own name. A local mod has no artwork to show. -->
+                <Border Grid.Column="0"
+                        Width="34"
+                        Height="34"
+                        CornerRadius="8"
+                        Background="{DynamicResource AccentSoftBrush}"
+                        VerticalAlignment="Center"
+                        Margin="0,0,11,0">
+                  <TextBlock Text="{Binding IconText}"
+                             Foreground="{DynamicResource AccentBrush}"
+                             FontSize="15"
+                             FontWeight="SemiBold"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                  <!-- Grid, not StackPanel: a StackPanel measures its children with infinite width, which
+                       disables TextTrimming, so a long mod name used to push the state badge out of the row. -->
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Name}"
+                               Style="{StaticResource BodyText}"
+                               FontWeight="SemiBold"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Name}" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Version}"
+                               Style="{StaticResource CaptionText}"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               MaxWidth="90"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" />
+                    <Border Grid.Column="2"
+                            Style="{StaticResource StatusPill}"
+                            Background="{Binding StateFill, Converter={StaticResource BrushPass}}"
+                            Margin="10,0,0,0">
+                      <TextBlock Text="{Binding StateText}"
+                                 Style="{StaticResource StatusPillText}"
+                                 Foreground="{Binding StateTone, Converter={StaticResource BrushPass}}" />
+                    </Border>
+                  </Grid>
+
+                  <Grid Margin="0,5,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Author}"
+                               Style="{StaticResource CaptionText}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Author}" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding FileCountText}"
+                               Style="{StaticResource CaptionText}"
+                               Margin="10,0,0,0"
+                               TextWrapping="NoWrap" />
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding SizeText}"
+                               Style="{StaticResource CaptionText}"
+                               Margin="10,0,0,0"
+                               TextWrapping="NoWrap" />
+                    <TextBlock Grid.Column="3"
+                               Text="{Binding ConflictSummary}"
+                               Style="{StaticResource CaptionText}"
+                               Foreground="{Binding ConflictTone, Converter={StaticResource BrushPass}}"
+                               Margin="10,0,0,0"
+                               TextWrapping="NoWrap" />
+                  </Grid>
+                  <!-- The deployment sentence was removed here: it repeated the state badge, the file count
+                       and the "部署信息" block of the detail pane. -->
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                  <!-- One action in the row, deliberately: enabling and disabling are the two things a
+                       user does from a list. Everything else lives in the detail pane on the right,
+                       which keeps the row narrow enough that the pane always fits. -->
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="启用"
+                          MinWidth="72"
+                          Visibility="{Binding IsEnabled, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
+                          Command="{Binding DataContext.EnableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                          CommandParameter="{Binding}" />
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="禁用"
+                          MinWidth="72"
+                          Visibility="{Binding IsEnabled, Converter={StaticResource BoolToVisibility}}"
+                          Command="{Binding DataContext.DisableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                          CommandParameter="{Binding}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <!-- Empty state. Two different situations used to share one message: an empty library and a
+           search/filter that matches nothing. Only the first one is "还没有 Mod". -->
+      <Border Grid.Column="0"
+              Style="{StaticResource Card}"
+              Padding="28,32"
+              VerticalAlignment="Top"
+              Visibility="{Binding FilteredMods.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+        <StackPanel>
+          <StackPanel Visibility="{Binding Mods.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+            <TextBlock Text="还没有 Mod"
+                       Style="{StaticResource SubtitleText}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="把 Mod 压缩包拖入窗口，或者点击右上角的“从压缩包安装…”"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,8,0,0"
+                       TextAlignment="Center" />
+          </StackPanel>
+          <StackPanel Visibility="{Binding Mods.Count, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="没有匹配的 Mod"
+                       Style="{StaticResource SubtitleText}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="试试清除搜索词，或把筛选切回“全部”。"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,8,0,0"
+                       TextAlignment="Center" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Right pane: detail, or the pending installation preview ===== -->
+      <ScrollViewer Grid.Column="1"
+                    VerticalScrollBarVisibility="Auto"
+                    Margin="16,0,0,0">
+
+        <!-- A ScrollViewer accepts exactly one child; these panels are mutually
+             exclusive (HasPreview, ShowBatchPanel and their inverses), so one Grid hosts them. -->
+        <Grid>
+          <!-- Batch import results -->
+          <StackPanel Visibility="{Binding ShowBatchPanel, Converter={StaticResource BoolToVisibility}}">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock Text="批量导入结果" Style="{StaticResource SubtitleText}" Margin="0,0,0,6" />
+                <TextBlock Text="失败的压缩包不会影响其他 Mod。点击“预览”逐个确认安装。"
+                           Style="{StaticResource CaptionText}"
+                           Margin="0,0,0,10" />
+
+                <ItemsControl ItemsSource="{Binding BatchResults}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="Auto" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0"
+                                Style="{StaticResource StatusPill}"
+                                Background="{Binding Fill, Converter={StaticResource BrushPass}}"
+                                VerticalAlignment="Top"
+                                Margin="0,0,10,0">
+                          <TextBlock Text="{Binding Badge}"
+                                     Style="{StaticResource StatusPillText}"
+                                     Foreground="{Binding Tone, Converter={StaticResource BrushPass}}" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1">
+                          <TextBlock Text="{Binding DisplayName}" Style="{StaticResource BodyText}" FontWeight="SemiBold"
+                                     TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}" />
+                          <TextBlock Text="{Binding Message}" Style="{StaticResource CaptionText}"
+                                     TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                          <Button Style="{StaticResource SecondaryButton}"
+                                  Content="预览"
+                                  Margin="0,0,6,0"
+                                  Visibility="{Binding Succeeded, Converter={StaticResource BoolToVisibility}}"
+                                  Command="{Binding DataContext.PreviewBatchRowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                          <Button Style="{StaticResource SecondaryButton}"
+                                  Content="移除"
+                                  Command="{Binding DataContext.RemoveBatchRowCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- Installation preview -->
+          <StackPanel Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibility}}">
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <!-- The mod being installed is this card's title; "安装预览" is the quiet eyebrow above it. -->
+                <TextBlock Text="安装预览" Style="{StaticResource SectionHeaderText}" Margin="0,0,0,2" />
+
+                <Grid Margin="0,0,0,2">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding PreviewModName}"
+                             Style="{StaticResource SubtitleText}"
+                             TextWrapping="NoWrap"
+                             TextTrimming="CharacterEllipsis"
+                             ToolTip="{Binding PreviewModName}" />
+                  <TextBlock Grid.Column="1"
+                             Text="{Binding PreviewVersionLine}"
+                             Style="{StaticResource CaptionText}"
+                             VerticalAlignment="Center"
+                             Margin="10,0,0,0"
+                             TextWrapping="NoWrap" />
+                </Grid>
+
+                <TextBlock Text="目标目录" Style="{StaticResource SectionHeaderText}" Margin="0,12,0,3" />
+                <TextBlock Text="{Binding PreviewTargetText}" Style="{StaticResource MonoText}" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                  <TextBlock Text="{Binding PreviewFileCountLine}"
+                             Style="{StaticResource BodyText}" Margin="0,0,14,0" />
+                  <TextBlock Text="{Binding PreviewSizeLine}"
+                             Style="{StaticResource BodyText}" Margin="0,0,14,0" />
+                  <TextBlock Text="{Binding PreviewConflictCountLine}"
+                             Style="{StaticResource BodyText}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding PreviewNeedsRootText}"
+                           Style="{StaticResource BodyText}"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource WarningBrush}"
+                           Margin="0,10,0,0"
+                           Visibility="{Binding PreviewNeedsRootText, Converter={StaticResource BoolToVisibility}}" />
+
+                <!-- Missing dependencies are surfaced before install, never silently ignored. -->
+                <Border Style="{StaticResource Callout}"
+                        Background="{DynamicResource WarningFillBrush}"
+                        Margin="0,10,0,0"
+                        Visibility="{Binding PreviewHasMissingDeps, Converter={StaticResource BoolToVisibility}}">
+                  <StackPanel>
+                    <TextBlock Text="缺失依赖"
+                               Style="{StaticResource BodyText}"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource WarningBrush}" />
+                    <TextBlock Text="{Binding PreviewMissingDepsText}"
+                               Style="{StaticResource CaptionText}"
+                               Margin="0,4,0,0" />
+                  </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding PreviewRootSummary}" Style="{StaticResource MonoText}" Margin="0,10,0,0" />
+                <TextBlock Text="为什么选择这个 Mod 根目录："
+                           Style="{StaticResource SectionHeaderText}"
+                           Margin="0,10,0,4" />
+
+                <ItemsControl ItemsSource="{Binding PreviewSignals}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" Style="{StaticResource CaptionText}" Margin="0,0,0,3" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Root correction: only offered when the layout is uncertain or ambiguous. -->
+                <StackPanel Orientation="Horizontal"
+                            Margin="0,12,0,0"
+                            Visibility="{Binding PreviewNeedsRootText, Converter={StaticResource BoolToVisibility}}">
+                  <ComboBox Style="{StaticResource AppComboBox}"
+                            ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                            MinWidth="180"
+                            ItemsSource="{Binding RootOptions}"
+                            SelectedItem="{Binding SelectedRootOption, Mode=TwoWay}" />
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="按所选目录重新分析"
+                          Margin="10,0,0,0"
+                          Command="{Binding ReanalyzeCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- Rejections. A refusal is a hard stop, so it is styled as one. -->
+            <Border Style="{StaticResource Callout}"
+                    Background="{DynamicResource DangerFillBrush}"
+                    Margin="0,10,0,0"
+                    Visibility="{Binding PreviewHasRejections, Converter={StaticResource BoolToVisibility}}">
+              <StackPanel>
+                <TextBlock Text="部分路径被拒绝"
+                           Style="{StaticResource BodyText}"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource DangerBrush}" />
+                <TextBlock Text="这些问题解决前安装将被阻止。被拒绝的路径意味着压缩包试图写入游戏的 Mod 目录之外。"
+                           Style="{StaticResource CaptionText}"
+                           Margin="0,4,0,6" />
+                <ItemsControl ItemsSource="{Binding PreviewRejections}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" Style="{StaticResource MonoText}" Margin="0,0,0,3" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <!-- Conflicts this install would create -->
+            <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+              <StackPanel>
+                <TextBlock Text="本次安装将产生的冲突" Style="{StaticResource SubtitleText}" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding PreviewConflicts}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Margin="0,0,0,6">
+                        <TextBlock Text="{Binding Chain}" Style="{StaticResource MonoText}" />
+                        <TextBlock Text="{Binding Reason}" Style="{StaticResource CaptionText}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <!-- Per-file source to target -->
+            <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+              <StackPanel>
+                <TextBlock Text="文件清单" Style="{StaticResource SubtitleText}" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding PreviewEntries}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="Auto" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0"
+                                Style="{StaticResource StatusPill}"
+                                Background="{Binding Fill, Converter={StaticResource BrushPass}}"
+                                VerticalAlignment="Top"
+                                Margin="0,0,10,0">
+                          <TextBlock Text="{Binding Badge}"
+                                     Style="{StaticResource StatusPillText}"
+                                     Foreground="{Binding Tone, Converter={StaticResource BrushPass}}" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1">
+                          <TextBlock Text="{Binding SourceRelative}" Style="{StaticResource MonoText}" />
+                          <TextBlock Text="{Binding TargetPath}" Style="{StaticResource MonoText}" />
+                          <TextBlock Text="{Binding Note}" Style="{StaticResource CaptionText}" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+              <Button Style="{StaticResource PrimaryButton}"
+                      Content="安装"
+                      Margin="0,0,8,0"
+                      Command="{Binding ConfirmInstallCommand}" />
+              <Button Style="{StaticResource SecondaryButton}"
+                      Content="取消"
+                      Command="{Binding CancelInstallCommand}" />
+            </StackPanel>
+          </StackPanel>
+
+          <!-- Mod detail -->
+          <StackPanel Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}">
+            <Border Style="{StaticResource Card}"
+                    Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}}">
+              <StackPanel>
+                <TextBlock Text="{Binding SelectedMod.Name}" Style="{StaticResource SubtitleText}"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedMod.Name}" />
+                <TextBlock Text="{Binding SelectedMod.Summary}" Style="{StaticResource SecondaryText}" Margin="0,6,0,0" />
+
+                <!-- Status and the primary toggle, mirroring the row but with room to breathe. -->
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                  <Border Style="{StaticResource StatusPill}"
+                          Background="{Binding SelectedMod.StateFill, Converter={StaticResource BrushPass}}"
+                          Margin="0,0,10,0">
+                    <TextBlock Text="{Binding SelectedMod.StateText}"
+                               Style="{StaticResource StatusPillText}"
+                               Foreground="{Binding SelectedMod.StateTone, Converter={StaticResource BrushPass}}" />
+                  </Border>
+                  <Button Style="{StaticResource PrimaryButton}"
+                          Content="启用"
+                          MinWidth="80"
+                          Visibility="{Binding SelectedMod.IsEnabled, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
+                          Command="{Binding EnableCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="禁用"
+                          MinWidth="80"
+                          Visibility="{Binding SelectedMod.IsEnabled, Converter={StaticResource BoolToVisibility}}"
+                          Command="{Binding DisableCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                </StackPanel>
+
+                <Border Style="{StaticResource Divider}" />
+
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="文件" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="{Binding SelectedMod.FileCountText}" Style="{StaticResource BodyText}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="大小" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="{Binding SelectedMod.SizeText}" Style="{StaticResource BodyText}" />
+                  </StackPanel>
+                </Grid>
+
+                <Border Style="{StaticResource Divider}" />
+
+                <TextBlock Text="部署信息" Style="{StaticResource SectionHeaderText}" />
+                <TextBlock Text="{Binding SelectedMod.DeploymentText}" Style="{StaticResource BodyText}" />
+                <TextBlock Text="{Binding SelectedMod.ConflictsText}" Style="{StaticResource CaptionText}" Margin="0,4,0,0" />
+
+                <Border Style="{StaticResource Divider}" />
+
+                <TextBlock Text="依赖" Style="{StaticResource SectionHeaderText}" />
+                <TextBlock Text="{Binding SelectedMod.DependenciesText}" Style="{StaticResource BodyText}" />
+
+                <TextBlock Text="前置要求" Style="{StaticResource SectionHeaderText}" Margin="0,12,0,4" />
+                <TextBlock Text="{Binding SelectedMod.RequirementsText}" Style="{StaticResource BodyText}" />
+
+                <TextBlock Text="已知不兼容" Style="{StaticResource SectionHeaderText}" Margin="0,12,0,4" />
+                <TextBlock Text="{Binding SelectedMod.IncompatibilitiesText}" Style="{StaticResource BodyText}" />
+
+                <Border Style="{StaticResource Divider}" />
+
+                <TextBlock Text="暂存目录" Style="{StaticResource SectionHeaderText}" />
+                <TextBlock Text="{Binding SelectedMod.StagingPath}" Style="{StaticResource MonoText}" />
+                <TextBlock Text="{Binding SelectedMod.InstalledText}" Style="{StaticResource CaptionText}" Margin="0,4,0,0" />
+
+                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="重新安装"
+                          Margin="0,0,8,0"
+                          Command="{Binding ReinstallCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="打开目录"
+                          Margin="0,0,8,0"
+                          Command="{Binding OpenModFolderCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                  <Button Style="{StaticResource SecondaryButton}"
+                          Content="查看冲突"
+                          Command="{Binding NavigateToConflictsCommand}" />
+                </StackPanel>
+
+                <!-- Destructive actions grouped and styled alike: both remove things, neither is a normal step. -->
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                  <Button Style="{StaticResource DangerButton}"
+                          Content="卸载"
+                          Margin="0,0,8,0"
+                          Command="{Binding UninstallCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                  <Button Style="{StaticResource DangerButton}"
+                          Content="从库中删除"
+                          ToolTip="仅限未部署的 Mod"
+                          Visibility="{Binding SelectedMod.IsStaged, Converter={StaticResource BoolToVisibility}}"
+                          Command="{Binding DeleteLibraryCommand}"
+                          CommandParameter="{Binding SelectedMod}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Text="选择一个 Mod 查看详情。"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="0,10,0,0"
+                       Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+          </StackPanel>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</UserControl>

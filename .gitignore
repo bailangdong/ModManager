@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+
+# ---------------------------------------------------------------------------
+# Local translation runtime and language packs.
+#
+# The Argos English → Chinese pack is about 67 MB and the CTranslate2 runtime is about another 90 MB
+# unpacked. Both are machine-specific, reproducible from the official index, and far too large to belong in
+# a repository — which is exactly the rule the task set. They live under tools/LocalTranslationEngine (a
+# prepared runtime for development and smoke runs) and under the application's own Data/Translation
+# directory at run time; neither is source.
+#
+# See Services/LocalTranslation/LocalArgosTranslationEngine.cs for how they are installed.
+# ---------------------------------------------------------------------------
+tools/LocalTranslationEngine/runtime/
+tools/LocalTranslationEngine/packages/
+tools/LocalTranslationEngine/downloads/
+tools/LocalTranslationEngine/wheels/
+tools/LocalTranslationEngine/engine_worker.py
+
+# Test and smoke scratch (including downloaded wheels kept for offline installs)
+artifacts/
+
+# Local run data and logs (portable app writes these next to the executable)
+Data/
+Downloads/
+Backups/
+Library/
+Cache/
+Logs/
+
+# Stray build/debug output and local logs
+*.log
+--nologo/

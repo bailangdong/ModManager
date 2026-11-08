@@ -1,0 +1,496 @@
+<!--
+  Settings page.
+
+  The Nexus key is entered into a PasswordBox and never read back, and the safety section lists the approved
+  write roots so the containment guarantee is inspectable rather than merely claimed.
+
+  Grouping follows the order a user configures things: the Nexus credential first, then what that credential
+  unlocks (connection state and capabilities), then the translation engine, then the deployment/download/
+  interface settings that share one save button. The trailing sections are read-only facts (about, safety,
+  locations) that need no save at all.
+-->
+<UserControl x:Class="ModManager.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModManager.App.Views"
+             xmlns:vm="clr-namespace:ModManager.App.ViewModels"
+             Background="Transparent">
+  <UserControl.Resources>
+    <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:BrushPassThroughConverter x:Key="BrushPass" />
+  </UserControl.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="{StaticResource PagePadding}">
+    <StackPanel>
+
+      <TextBlock Text="设置" Style="{StaticResource PageTitleText}" />
+      <TextBlock Text="{Binding Status}" Style="{StaticResource SecondaryText}" Margin="0,4,0,16" />
+
+      <!-- ===== Nexus Mods ===== -->
+      <TextBlock Text="NEXUS MODS" Style="{StaticResource SectionHeaderText}" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="{Binding NexusAccount}" Style="{StaticResource BodyText}" />
+
+          <TextBlock Text="Mod Manager 只使用官方 Nexus Mods API。它从不抓取网页、从不重放浏览器 Cookie、从不绕过登录或权限检查。请在自己的 Nexus 账号页面生成个人 API Key 并粘贴到这里。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,8,0,12" />
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <PasswordBox x:Name="ApiKeyBox"
+                         Grid.Column="0"
+                         Style="{StaticResource AppPasswordBox}"
+                         Margin="0,0,10,0"
+                         PasswordChanged="OnApiKeyChanged"
+                         ToolTip="粘贴你的 Nexus Mods API Key" />
+
+            <Button Grid.Column="1"
+                    Style="{StaticResource PrimaryButton}"
+                    Content="保存 Key"
+                    Margin="0,0,8,0"
+                    Command="{Binding SaveApiKeyCommand}" />
+
+            <Button Grid.Column="2"
+                    Style="{StaticResource DangerButton}"
+                    Content="退出登录"
+                    Command="{Binding ClearApiKeyCommand}" />
+          </Grid>
+
+          <TextBlock Text="{Binding SecretStoreNote}"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,10,0,0" />
+
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="Nexus 搜索中包含成人内容标记的结果"
+                    IsChecked="{Binding IncludeAdultContent, Mode=TwoWay}"
+                    Margin="0,10,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Nexus connection and capabilities: directly under the credential it describes. ===== -->
+      <TextBlock Text="NEXUS 连接与能力" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource StatusPill}"
+                    Background="{DynamicResource SurfaceMutedBrush}"
+                    VerticalAlignment="Center">
+              <TextBlock Text="{Binding NexusConnectionText}" Style="{StaticResource StatusPillText}" />
+            </Border>
+            <TextBlock Grid.Column="1"
+                       Text="{Binding NexusLastSyncText}"
+                       Style="{StaticResource CaptionText}"
+                       VerticalAlignment="Center"
+                       Margin="10,0,0,0" />
+            <Button Grid.Column="2"
+                    Style="{StaticResource SecondaryButton}"
+                    Content="测试连接"
+                    ToolTip="用已保存的密钥请求一次账号信息"
+                    Command="{Binding SaveApiKeyCommand}"
+                    IsEnabled="{Binding HasApiKey}" />
+          </Grid>
+
+          <Border Style="{StaticResource Callout}"
+                  Background="{DynamicResource DangerFillBrush}"
+                  Margin="0,12,0,0"
+                  Visibility="{Binding HasNexusError, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+              <TextBlock Text="连接测试失败"
+                         Style="{StaticResource SubtitleText}"
+                         Foreground="{DynamicResource DangerBrush}" />
+              <TextBlock Text="{Binding NexusLastErrorText}"
+                         Style="{StaticResource SecondaryText}"
+                         Margin="0,6,0,0"
+                         TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Divider}" />
+
+          <TextBlock Text="能力" Style="{StaticResource SectionHeaderText}" />
+          <ItemsControl ItemsSource="{Binding NexusCapabilities}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid Margin="0,0,0,8">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+
+                  <Border Grid.Column="0"
+                          Style="{StaticResource StatusPill}"
+                          Background="{Binding Fill, Converter={StaticResource BrushPass}}"
+                          Margin="0,0,10,0">
+                    <TextBlock Text="{Binding StateText}"
+                               Style="{StaticResource StatusPillText}"
+                               Foreground="{Binding Tone, Converter={StaticResource BrushPass}}" />
+                  </Border>
+
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Name}" Style="{StaticResource BodyText}" />
+                    <TextBlock Text="{Binding Detail}" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border Style="{StaticResource Divider}" />
+
+          <TextBlock Text="需要在 Nexus 页面手动完成的操作" Style="{StaticResource SectionHeaderText}" />
+          <ItemsControl ItemsSource="{Binding NexusManualActions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" Style="{StaticResource CaptionText}" Margin="0,0,0,6" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- ===================== Translation ===================== -->
+      <TextBlock Text="翻译" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="把 Mod 标题、简介和描述翻译成中文。默认使用完全免费的本地 Argos 引擎：不需要 API 密钥、不需要会员，安装完成后翻译过程不联网。也可以改用任何 OpenAI 兼容的在线接口。"
+                     Style="{StaticResource SecondaryText}"
+                     TextWrapping="Wrap" />
+
+          <!-- ===== which engine ===== -->
+          <Grid Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="翻译引擎" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1"
+                      Style="{StaticResource AppComboBox}"
+                      ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                      ItemsSource="{Binding TranslationEngineChoices}"
+                      SelectedItem="{Binding TranslationEngineChoice, Mode=TwoWay}"
+                      ToolTip="自动：本地可用时用本地，否则用在线接口" />
+          </Grid>
+
+          <!-- ===== local engine ===== -->
+          <Border Style="{StaticResource FlatCard}" Margin="0,14,0,0">
+            <StackPanel>
+              <TextBlock Text="本地引擎 · Argos Translate（免费、离线）" Style="{StaticResource SubtitleText}" />
+
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="引擎状态" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding LocalEngineStateText}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap" />
+              </Grid>
+
+              <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="140" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="语言包" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding LocalPackageStateText}"
+                           Style="{StaticResource BodyText}"
+                           TextWrapping="Wrap" />
+              </Grid>
+
+              <TextBlock Text="{Binding LocalEngineDetail}"
+                         Style="{StaticResource SecondaryText}"
+                         Margin="0,10,0,0"
+                         TextWrapping="Wrap" />
+
+              <ProgressBar Style="{StaticResource AppProgressBar}"
+                           Height="6"
+                           Margin="0,10,0,0"
+                           Minimum="0"
+                           Maximum="100"
+                           Value="{Binding LocalInstallProgress, Mode=OneWay}"
+                           Visibility="{Binding IsInstallingLocal, Converter={StaticResource BoolToVisibility}}" />
+
+              <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button Style="{StaticResource PrimaryButton}"
+                        Content="初始化本地引擎"
+                        Margin="0,0,8,0"
+                        ToolTip="创建隔离的翻译运行时，并从 Argos 官方索引下载英语→简体中文语言包（约 67 MB）"
+                        Command="{Binding InitializeLocalEngineCommand}" />
+                <Button Style="{StaticResource SecondaryButton}"
+                        Content="测试翻译"
+                        ToolTip="真实翻译一句英文并显示返回的中文，用来确认引擎确实可用"
+                        Command="{Binding TestLocalTranslationCommand}" />
+              </StackPanel>
+
+              <TextBlock Text="{Binding LocalTestResult}"
+                         Style="{StaticResource SecondaryText}"
+                         Margin="0,10,0,0"
+                         TextWrapping="Wrap" />
+
+              <TextBlock Text="{Binding LocalEnginePathText, StringFormat='安装位置：{0}'}"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,8,0,0"
+                         TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="在线接口（可选）：密钥保存在 Windows DPAPI 加密的密钥库中，不写入设置文件、不写入日志、不显示在界面上。留空则只使用本地引擎。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,14,0,0"
+                     TextWrapping="Wrap" />
+
+          <Grid Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="服务地址" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1"
+                     Style="{StaticResource AppTextBox}"
+                     Text="{Binding TranslationEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="例如 https://api.deepseek.com/chat/completions" />
+          </Grid>
+
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="模型" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1"
+                     Style="{StaticResource AppTextBox}"
+                     Text="{Binding TranslationModel, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="例如 deepseek-chat" />
+          </Grid>
+
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="140" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="API 密钥" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1"
+                     Style="{StaticResource AppTextBox}"
+                     Text="{Binding TranslationKeyInput, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="只写入加密密钥库，保存后输入框会清空" />
+          </Grid>
+
+          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <Button Style="{StaticResource PrimaryButton}"
+                    Content="保存翻译设置"
+                    Margin="0,0,8,0"
+                    Command="{Binding SaveTranslationCommand}" />
+            <TextBlock Text="{Binding TranslationKeyState}"
+                       Style="{StaticResource CaptionText}"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+
+          <TextBlock Text="{Binding TranslationStatus}"
+                     Style="{StaticResource SecondaryText}"
+                     Margin="0,10,0,0"
+                     TextWrapping="Wrap"
+                     Visibility="{Binding TranslationStatus, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Deployment ===== -->
+      <TextBlock Text="部署方式" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="Mod 文件如何放入游戏目录。硬链接与符号链接不占用额外磁盘空间；复制始终可用，但会重复占用空间。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,0,0,8" />
+
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="允许硬链接（与暂存副本共享内容，不占额外磁盘空间）"
+                    IsChecked="{Binding UseHardlinks, Mode=TwoWay}" />
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="允许符号链接（Windows 需要开发者模式）"
+                    IsChecked="{Binding UseSymlinks, Mode=TwoWay}" />
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="覆盖游戏文件前先备份原文件"
+                    IsChecked="{Binding BackupBeforeOverwrite, Mode=TwoWay}" />
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="部署后按哈希校验文件"
+                    IsChecked="{Binding VerifyAfterDeploy, Mode=TwoWay}" />
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="部署中途失败时自动回滚"
+                    IsChecked="{Binding RollbackOnFailure, Mode=TwoWay}" />
+
+          <TextBlock Text="复制始终作为最后手段被允许，因此在不支持其他方式的文件系统上部署也不会彻底失败。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,8,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Downloads ===== -->
+      <TextBlock Text="下载" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <!-- The current value sits opposite its label: a slider without a readout is a guess. -->
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="同时下载数（1 到 8）" Style="{StaticResource BodyText}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding MaxConcurrency}"
+                       Style="{StaticResource BodyText}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+          </Grid>
+          <Slider Minimum="1"
+                  Maximum="8"
+                  TickFrequency="1"
+                  IsSnapToTickEnabled="True"
+                  Width="240"
+                  HorizontalAlignment="Left"
+                  Margin="0,6,0,0"
+                  Value="{Binding MaxConcurrency, Mode=TwoWay}" />
+          <TextBlock Text="下载始终进入缓存并在使用前校验。未完成的下载保留足够信息以便断点续传，而不是重新开始。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,8,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Interface ===== -->
+      <TextBlock Text="界面" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="深色模式"
+                    ToolTip="立即生效，并记住你的选择"
+                    IsChecked="{Binding DarkMode, Mode=TwoWay}" />
+
+          <TextBlock Text="深色配色适合夜间使用。切换是即时的，不需要重启。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="24,4,0,0" />
+
+          <CheckBox Style="{StaticResource AppCheckBox}"
+                    Content="即使 Mod 根目录明确，也始终显示安装预览"
+                    Margin="0,14,0,0"
+                    IsChecked="{Binding AlwaysShowPreview, Mode=TwoWay}" />
+
+          <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <TextBlock Text="启动时打开页面" Style="{StaticResource BodyText}" VerticalAlignment="Center" Margin="0,0,10,0" />
+            <ComboBox Style="{StaticResource AppComboBox}"
+                      ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                      MinWidth="140"
+                      ItemsSource="{x:Static vm:SettingsViewModel.AvailablePages}"
+                      SelectedItem="{Binding StartupPageName, Mode=TwoWay}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- One save button for exactly the three cards above it; the Key and translation cards save themselves. -->
+      <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+        <Button Style="{StaticResource PrimaryButton}"
+                Content="保存设置"
+                Command="{Binding SaveSettingsCommand}" />
+        <TextBlock Text="保存部署方式、下载与界面设置；上方 Key 与翻译各有自己的保存按钮。"
+                   Style="{StaticResource CaptionText}"
+                   VerticalAlignment="Center"
+                   Margin="10,0,0,0" />
+      </StackPanel>
+
+      <!-- ===== About ===== -->
+      <TextBlock Text="关于" Style="{StaticResource SectionHeaderText}" Margin="0,24,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="ModManager" Style="{StaticResource SubtitleText}" />
+          <TextBlock Text="{Binding VersionLine}"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,4,0,0" />
+          <TextBlock Text="通用 Mod 管理器：导入、分析、安全安装、冲突检测、卸载与恢复。所有数据保存在应用自己的目录内。"
+                     Style="{StaticResource SecondaryText}"
+                     Margin="0,6,0,0" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Safety ===== -->
+      <TextBlock Text="安全" Style="{StaticResource SectionHeaderText}" Margin="0,24,0,8" />
+      <Border Style="{StaticResource Callout}">
+        <StackPanel>
+          <TextBlock Text="所有写入都被限制在已批准的 Mod 根目录内"
+                     Style="{StaticResource SubtitleText}" />
+          <TextBlock Text="每次文件操作都会对照此列表检查。批准根目录之外的路径会被拒绝，盘符根、系统目录以及任何通过链接解析到其他位置的路径同样会被拒绝。"
+                     Style="{StaticResource CaptionText}"
+                     Margin="0,6,0,8" />
+
+          <ItemsControl ItemsSource="{Binding ApprovedRoots}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="0,0,0,8">
+                  <TextBlock Text="{Binding GameId}" Style="{StaticResource BodyText}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding ModRootPath}" Style="{StaticResource MonoText}" />
+                  <TextBlock Text="{Binding InstallPath}" Style="{StaticResource MonoText}" />
+                  <TextBlock Text="{Binding ApprovedText}" Style="{StaticResource CaptionText}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <TextBlock Text="还没有批准任何游戏，因此无法写入任何内容。"
+                     Style="{StaticResource CaptionText}"
+                     Visibility="{Binding ApprovedRoots.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+        </StackPanel>
+      </Border>
+
+      <!-- ===== Locations ===== -->
+      <TextBlock Text="目录位置与默认游戏" Style="{StaticResource SectionHeaderText}" Margin="0,20,0,8" />
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock Text="默认游戏" Style="{StaticResource SectionHeaderText}" />
+          <TextBlock Text="{Binding DefaultGameText}" Style="{StaticResource BodyText}" />
+
+          <TextBlock Text="应用数据" Style="{StaticResource SectionHeaderText}" Margin="0,12,0,8" />
+          <TextBlock Text="{Binding DataPath}" Style="{StaticResource MonoText}" />
+
+          <TextBlock Text="暂存的 Mod" Style="{StaticResource SectionHeaderText}" Margin="0,10,0,8" />
+          <TextBlock Text="{Binding StagingPath}" Style="{StaticResource MonoText}" />
+
+          <TextBlock Text="下载" Style="{StaticResource SectionHeaderText}" Margin="0,10,0,8" />
+          <TextBlock Text="{Binding DownloadPath}" Style="{StaticResource MonoText}" />
+
+          <TextBlock Text="备份" Style="{StaticResource SectionHeaderText}" Margin="0,10,0,8" />
+          <TextBlock Text="{Binding BackupPath}" Style="{StaticResource MonoText}" />
+
+          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <Button Style="{StaticResource SecondaryButton}"
+                    Content="打开数据目录"
+                    Margin="0,0,8,0"
+                    Command="{Binding OpenDataFolderCommand}" />
+            <Button Style="{StaticResource SecondaryButton}"
+                    Content="打开日志目录"
+                    Command="{Binding OpenLogFolderCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

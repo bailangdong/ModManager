@@ -1,0 +1,561 @@
+<!--
+  Games page: every game found on this machine, what support it has, and what can be done with it.
+
+  Laid out as a table rather than a stack of cards. A game row carries six facts that a user compares
+  across rows — app id, support level, loader state, mod count — and comparison is what a table is for.
+  The scan still reports everything it finds, including games with no dedicated definition, because
+  "installed" and "officially supported" are different questions and the page answers both.
+
+  Visual hierarchy: page title 22, section titles 15 (SubtitleText), body 13, helper text 12. The table is
+  the page's protagonist; the header keeps only the title and the scan action, because the long detection
+  sentence that used to sit under the title repeated the five count pills directly below it.
+-->
+<UserControl x:Class="ModManager.App.Views.GamesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModManager.App.Views"
+             Background="Transparent"
+             FontFamily="{StaticResource UiFont}">
+  <UserControl.Resources>
+    <local:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:BrushPassThroughConverter x:Key="BrushPass" />
+
+    <!-- One column set shared by the managed table's header and its rows, so they cannot drift apart.
+         Widened around the status column: the generic-support badge is long, and a badge that overflows
+         its column would paint over the loader badge next to it. -->
+    <GridLength x:Key="GamesColAppId">84</GridLength>
+    <GridLength x:Key="GamesColSupport">116</GridLength>
+    <GridLength x:Key="GamesColLoader">112</GridLength>
+    <GridLength x:Key="GamesColMods">84</GridLength>
+    <GridLength x:Key="GamesColActions">170</GridLength>
+  </UserControl.Resources>
+
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel>
+
+      <!-- ===================== Header ===================== -->
+      <Grid Margin="{StaticResource PageHeaderPadding}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+          <TextBlock Text="游戏库" Style="{StaticResource PageTitleText}" />
+          <TextBlock Text="下面的计数来自最近一次检测；扫描不会改动已添加的游戏。"
+                     Style="{StaticResource PageSubtitleText}" />
+        </StackPanel>
+
+        <Button Grid.Column="1"
+                Style="{StaticResource SecondaryButton}"
+                Content="重新检测 Steam 游戏"
+                VerticalAlignment="Center"
+                Command="{Binding ScanCommand}" />
+      </Grid>
+
+      <StackPanel Margin="{StaticResource PageBodyPadding}">
+
+        <!-- Detection counts, as pills rather than five large tiles. -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+          <Border Style="{StaticResource StatusPill}" Background="{DynamicResource SurfaceMutedBrush}" Padding="11,6" Margin="0,0,8,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="已检测" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding DetectedCount}" Style="{StaticResource StatusPillText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StatusPill}" Background="{DynamicResource SuccessFillBrush}" Padding="11,6" Margin="0,0,8,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="专用支持" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding SupportedCount}" Style="{StaticResource StatusPillText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StatusPill}" Background="{DynamicResource InfoFillBrush}" Padding="11,6" Margin="0,0,8,0">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="通用模式" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding GenericCount}" Style="{StaticResource StatusPillText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StatusPill}" Background="{DynamicResource DangerFillBrush}" Padding="11,6" Margin="0,0,8,0"
+                  Visibility="{Binding InvalidCount, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="异常" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding InvalidCount}" Style="{StaticResource StatusPillText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource StatusPill}" Background="{DynamicResource SurfaceMutedBrush}" Padding="11,6">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="已管理" Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding ManagedCount}" Style="{StaticResource StatusPillText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
+
+          <!-- The one sentence the old header spent on the same numbers, shown only when it applies. -->
+          <TextBlock Text="未检测到 Steam 游戏，可在下方按 AppID 或目录手动添加。"
+                     Style="{StaticResource CaptionText}"
+                     VerticalAlignment="Center"
+                     Margin="4,0,0,0"
+                     Visibility="{Binding DetectedGames.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+        </StackPanel>
+
+        <!-- ===================== Managed games ===================== -->
+        <TextBlock Text="已管理的游戏" Style="{StaticResource SubtitleText}" Margin="0,0,0,10" />
+
+        <Border Style="{StaticResource TableSurface}">
+          <StackPanel>
+            <!-- Header. Top padding added: with only bottom padding the column labels touched the card edge. -->
+            <Border Background="{DynamicResource SurfaceRaisedBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    CornerRadius="11,11,0,0"
+                    Padding="14,10,14,8">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" MinWidth="180" />
+                  <ColumnDefinition Width="{StaticResource GamesColAppId}" />
+                  <ColumnDefinition Width="{StaticResource GamesColSupport}" />
+                  <ColumnDefinition Width="{StaticResource GamesColLoader}" />
+                  <ColumnDefinition Width="{StaticResource GamesColMods}" />
+                  <ColumnDefinition Width="{StaticResource GamesColActions}" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="游戏" Style="{StaticResource TableHeaderText}" />
+                <TextBlock Grid.Column="1" Text="AppID" Style="{StaticResource TableHeaderText}" />
+                <TextBlock Grid.Column="2" Text="状态" Style="{StaticResource TableHeaderText}" />
+                <TextBlock Grid.Column="3" Text="加载器" Style="{StaticResource TableHeaderText}" />
+                <TextBlock Grid.Column="4" Text="Mod 启用/总" Style="{StaticResource TableHeaderText}" />
+                <TextBlock Grid.Column="5" Text="操作" Style="{StaticResource TableHeaderText}" />
+              </Grid>
+            </Border>
+
+            <ListBox Style="{StaticResource AppListBox}"
+                     ItemsSource="{Binding Registered}"
+                     ItemContainerStyle="{StaticResource TableRow}"
+                     BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="{StaticResource RowPadding}" MinHeight="52">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" MinWidth="180" />
+                      <ColumnDefinition Width="{StaticResource GamesColAppId}" />
+                      <ColumnDefinition Width="{StaticResource GamesColSupport}" />
+                      <ColumnDefinition Width="{StaticResource GamesColLoader}" />
+                      <ColumnDefinition Width="{StaticResource GamesColMods}" />
+                      <ColumnDefinition Width="{StaticResource GamesColActions}" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Cover + name + path. Never a letter tile: no artwork means an empty tile.
+                         The name row is a Grid, not a horizontal StackPanel: inside a StackPanel the name
+                         is measured with infinite width, so TextTrimming never applies and a long game
+                         name paints over the AppID column. -->
+                    <Grid Grid.Column="0" Margin="0,0,12,0">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+
+                      <Border Grid.Column="0"
+                              Width="42" Height="42"
+                              CornerRadius="8"
+                              Background="{DynamicResource SurfaceMutedBrush}"
+                              VerticalAlignment="Center"
+                              Margin="0,0,11,0">
+                        <Border.Clip>
+                          <RectangleGeometry Rect="0,0,42,42" RadiusX="8" RadiusY="8" />
+                        </Border.Clip>
+                        <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                      </Border>
+
+                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding Name}"
+                                     Style="{StaticResource FieldValueText}"
+                                     FontWeight="SemiBold"
+                                     TextWrapping="NoWrap"
+                                     TextTrimming="CharacterEllipsis"
+                                     ToolTip="{Binding Name}" />
+                          <Border Grid.Column="1"
+                                  Style="{StaticResource StatusPill}"
+                                  Background="{DynamicResource InfoFillBrush}"
+                                  Margin="8,0,0,0"
+                                  Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="默认" Style="{StaticResource StatusPillText}" Foreground="{DynamicResource InfoBrush}" />
+                          </Border>
+                        </Grid>
+                        <!-- Quiet: the mod root is reference data, not a headline. -->
+                        <TextBlock Text="{Binding ModRootPath}"
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,2,0,0"
+                                   ToolTip="{Binding InstallPath}" />
+                        <TextBlock Text="{Binding MissingText}"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{DynamicResource DangerBrush}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="{Binding MissingText, Converter={StaticResource BoolToVisibility}}" />
+                      </StackPanel>
+                    </Grid>
+
+                    <!-- The column header already says AppID, so the cell does not repeat the word. -->
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding SteamAppId, TargetNullValue=—}"
+                               Style="{StaticResource MonoText}"
+                               VerticalAlignment="Center"
+                               TextWrapping="NoWrap" />
+
+                    <Border Grid.Column="2"
+                            Style="{StaticResource StatusPill}"
+                            Background="{Binding SupportFill, Converter={StaticResource BrushPass}}"
+                            HorizontalAlignment="Left"
+                            MaxWidth="112">
+                      <TextBlock Text="{Binding SupportText}"
+                                 Style="{StaticResource StatusPillText}"
+                                 Foreground="{Binding SupportTone, Converter={StaticResource BrushPass}}"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip="{Binding SupportText}" />
+                    </Border>
+
+                    <Border Grid.Column="3"
+                            Style="{StaticResource StatusPill}"
+                            Background="{Binding LoaderFill, Converter={StaticResource BrushPass}}"
+                            HorizontalAlignment="Left"
+                            MaxWidth="108">
+                      <TextBlock Text="{Binding LoaderText}"
+                                 Style="{StaticResource StatusPillText}"
+                                 Foreground="{Binding LoaderTone, Converter={StaticResource BrushPass}}"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip="{Binding LoaderText}" />
+                    </Border>
+
+                    <!-- Two numbers instead of one long sentence: enabled is the primary figure. -->
+                    <StackPanel Grid.Column="4"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                ToolTip="{Binding ModSummary}">
+                      <TextBlock Text="{Binding EnabledModCount}"
+                                 Style="{StaticResource BodyText}"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="NoWrap" />
+                      <TextBlock Text="/"
+                                 Style="{StaticResource CaptionText}"
+                                 Margin="2,0"
+                                 VerticalAlignment="Center" />
+                      <TextBlock Text="{Binding ModCount}"
+                                 Style="{StaticResource CaptionText}"
+                                 VerticalAlignment="Center"
+                                 TextWrapping="NoWrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                      <Button Style="{StaticResource PrimaryButton}"
+                              Content="管理"
+                              Padding="12,5"
+                              Command="{Binding DataContext.ManageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+                      <Button Style="{StaticResource SecondaryButton}"
+                              Content="&#xE768;"
+                              FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                              Padding="10,5"
+                              Margin="6,0,0,0"
+                              ToolTip="启动游戏"
+                              Command="{Binding DataContext.LaunchCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                              CommandParameter="{Binding}" />
+
+                      <ToggleButton x:Name="MoreToggle"
+                                    Style="{StaticResource MoreMenuToggle}"
+                                    Content="&#xE712;"
+                                    Margin="6,0,0,0"
+                                    ToolTip="更多操作" />
+
+                      <Popup IsOpen="{Binding IsChecked, ElementName=MoreToggle, Mode=TwoWay}"
+                             StaysOpen="False"
+                             PlacementTarget="{Binding ElementName=MoreToggle}"
+                             Placement="Bottom"
+                             HorizontalOffset="-150"
+                             VerticalOffset="4"
+                             AllowsTransparency="True">
+                        <Border Style="{StaticResource MenuSurface}">
+                          <StackPanel Width="182">
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="打开游戏目录"
+                                    Command="{Binding DataContext.OpenGameFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="启动设置…"
+                                    ToolTip="配置 EXE、启动参数与工作目录"
+                                    Command="{Binding DataContext.LaunchSettingsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="设置 Mod 目录…"
+                                    ToolTip="仅通用模式的游戏可以修改"
+                                    Visibility="{Binding IsGeneric, Converter={StaticResource BoolToVisibility}}"
+                                    Command="{Binding DataContext.SetModRootCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="编辑安装路径…"
+                                    Command="{Binding DataContext.EditPathCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="设为默认游戏"
+                                    Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}"
+                                    Command="{Binding DataContext.SetDefaultCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                            <Border Style="{StaticResource Divider}" Margin="4,5" />
+                            <Button Style="{StaticResource MenuActionButton}"
+                                    Content="移除游戏"
+                                    Foreground="{DynamicResource DangerBrush}"
+                                    ToolTip="从列表中移除。不会删除任何文件。"
+                                    Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}" />
+                          </StackPanel>
+                        </Border>
+                      </Popup>
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+
+            <TextBlock Text="还没有管理任何游戏。在下方检测结果里添加，或按 AppID / 目录手动添加。"
+                       Style="{StaticResource SecondaryText}"
+                       Margin="14,16"
+                       Visibility="{Binding Registered.Count, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
+          </StackPanel>
+        </Border>
+
+        <!-- ===================== Detected, not yet managed ===================== -->
+        <TextBlock Text="检测到的游戏" Style="{StaticResource SubtitleText}" Margin="0,22,0,10"
+                   Visibility="{Binding DetectedGames.Count, Converter={StaticResource BoolToVisibility}}" />
+
+        <ItemsControl ItemsSource="{Binding DetectedGames}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource FlatCard}" Padding="12,10" Margin="0,0,0,8">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+
+                  <Border Grid.Column="0"
+                          Width="40" Height="40"
+                          CornerRadius="8"
+                          Background="{DynamicResource SurfaceMutedBrush}"
+                          VerticalAlignment="Center"
+                          Margin="0,0,12,0">
+                    <Border.Clip>
+                      <RectangleGeometry Rect="0,0,40,40" RadiusX="8" RadiusY="8" />
+                    </Border.Clip>
+                    <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                  </Border>
+
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <!-- Grid rather than StackPanel so a long game name truncates instead of pushing the
+                         badges off the row. -->
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="{Binding Name}"
+                                 Style="{StaticResource FieldValueText}"
+                                 FontWeight="SemiBold"
+                                 TextWrapping="NoWrap"
+                                 TextTrimming="CharacterEllipsis"
+                                 ToolTip="{Binding Name}" />
+                      <Border Grid.Column="1"
+                              Style="{StaticResource StatusPill}"
+                              Background="{Binding SupportFill, Converter={StaticResource BrushPass}}"
+                              Margin="8,0,0,0">
+                        <TextBlock Text="{Binding SupportText}" Style="{StaticResource StatusPillText}"
+                                   Foreground="{Binding SupportTone, Converter={StaticResource BrushPass}}" />
+                      </Border>
+                      <!-- Only rendered when the row is already managed: an "未添加" badge on every row was noise. -->
+                      <Border Grid.Column="2"
+                              Style="{StaticResource StatusPill}"
+                              Background="{DynamicResource SurfaceMutedBrush}"
+                              Margin="6,0,0,0"
+                              Visibility="{Binding IsManaged, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding ManagedText}" Style="{StaticResource StatusPillText}"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                      </Border>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                      <TextBlock Text="{Binding AppIdText}" Style="{StaticResource CaptionText}"
+                                 TextWrapping="NoWrap" />
+                      <!-- Empty when there is no Nexus mapping; collapsing it also drops its margin. -->
+                      <TextBlock Text="{Binding NexusText}" Style="{StaticResource CaptionText}"
+                                 Margin="12,0,0,0"
+                                 TextWrapping="NoWrap"
+                                 Visibility="{Binding NexusText, Converter={StaticResource BoolToVisibility}}" />
+                      <!-- Only worth a line when the game is managed and actually has mods. -->
+                      <TextBlock Text="{Binding ModCount, StringFormat=已安装 {0} 个 Mod}"
+                                 Style="{StaticResource CaptionText}"
+                                 Margin="12,0,0,0"
+                                 TextWrapping="NoWrap"
+                                 Visibility="{Binding ModCount, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding InstallPath}" Style="{StaticResource CaptionText}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,3,0,0"
+                               ToolTip="{Binding InstallPath}" />
+                    <TextBlock Text="{Binding ProblemText}" Style="{StaticResource CaptionText}"
+                               Foreground="{DynamicResource DangerBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding ProblemText}"
+                               Visibility="{Binding ProblemText, Converter={StaticResource BoolToVisibility}}" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource PrimaryButton}"
+                            Content="添加并管理"
+                            Padding="12,5"
+                            Visibility="{Binding CanAdd, Converter={StaticResource BoolToVisibility}}"
+                            Command="{Binding DataContext.AddDetectedCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                            CommandParameter="{Binding}" />
+                    <Button Style="{StaticResource SecondaryButton}"
+                            Content="打开目录"
+                            Padding="12,5"
+                            Margin="6,0,0,0"
+                            Visibility="{Binding IsValid, Converter={StaticResource BoolToVisibility}}"
+                            Command="{Binding DataContext.OpenDetectedFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                            CommandParameter="{Binding}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- ===================== Found outside Steam ===================== -->
+        <TextBlock Text="其他方式检测到的游戏"
+                   Style="{StaticResource SubtitleText}"
+                   Margin="0,18,0,10"
+                   Visibility="{Binding OtherMatches.Count, Converter={StaticResource BoolToVisibility}}" />
+
+        <ItemsControl ItemsSource="{Binding OtherMatches}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource FlatCard}" Padding="12,10" Margin="0,0,0,8">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+
+                  <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}"
+                               Style="{StaticResource FieldValueText}"
+                               FontWeight="SemiBold"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding InstallPath}" Style="{StaticResource CaptionText}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,3,0,0"
+                               ToolTip="{Binding InstallPath}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                      <TextBlock Text="{Binding ConfidenceText}" Style="{StaticResource CaptionText}" />
+                      <TextBlock Text="·" Style="{StaticResource CaptionText}" Margin="6,0" />
+                      <TextBlock Text="{Binding Method}" Style="{StaticResource CaptionText}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding EvidenceText}" Style="{StaticResource CaptionText}"
+                               Margin="0,3,0,0"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding EvidenceText}" />
+                  </StackPanel>
+
+                  <Button Grid.Column="1"
+                          Style="{StaticResource PrimaryButton}"
+                          Content="添加并管理"
+                          Padding="12,5"
+                          Margin="10,0,0,0"
+                          VerticalAlignment="Center"
+                          Command="{Binding DataContext.AddCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                          CommandParameter="{Binding}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- ===================== Manual add ===================== -->
+        <TextBlock Text="手动添加" Style="{StaticResource SubtitleText}" Margin="0,18,0,10" />
+
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <Border Grid.Column="0" Style="{StaticResource FlatCard}">
+            <StackPanel>
+              <TextBlock Text="按 Steam AppID 添加" Style="{StaticResource BodyText}" FontWeight="SemiBold" />
+              <TextBlock Text="纯数字 AppID，例如 1091500。本机已安装时会按“已支持”或“通用模式”加入。"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,5,0,0" />
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0"
+                         Style="{StaticResource AppTextBox}"
+                         Margin="0,0,10,0"
+                         Text="{Binding AppIdInput, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="纯数字，例如 1091500" />
+                <Button Grid.Column="1"
+                        Style="{StaticResource PrimaryButton}"
+                        Content="查找并添加"
+                        Command="{Binding AddByAppIdCommand}" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Column="2" Style="{StaticResource FlatCard}">
+            <StackPanel>
+              <TextBlock Text="按目录添加" Style="{StaticResource BodyText}" FontWeight="SemiBold" />
+              <TextBlock Text="选择游戏定义并粘贴安装目录。写入任何内容之前，都会先用该游戏的必要文件校验目录。"
+                         Style="{StaticResource CaptionText}"
+                         Margin="0,5,0,0" />
+              <ComboBox Style="{StaticResource AppComboBox}"
+                        ItemContainerStyle="{StaticResource AppComboBoxItem}"
+                        ItemsSource="{Binding AvailableDefinitions}"
+                        DisplayMemberPath="Name"
+                        SelectedItem="{Binding ManualDefinition, Mode=TwoWay}"
+                        Margin="0,12,0,0" />
+              <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0"
+                         Style="{StaticResource AppTextBox}"
+                         Text="{Binding ManualPath, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,10,0"
+                         ToolTip="例如 C:\Games\MyGame" />
+                <Button Grid.Column="1"
+                        Style="{StaticResource PrimaryButton}"
+                        Content="添加"
+                        Command="{Binding AddManualCommand}" />
+              </Grid>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

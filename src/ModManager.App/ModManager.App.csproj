@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ModManager.App — the WPF shell.
+
+    WPF rather than WinUI 3 or Avalonia, for two concrete reasons: the Windows Desktop runtime is already on
+    any machine that can run this, so there is nothing to install; and the theme in Theme/ is written by hand
+    against stock WPF primitives, which keeps the project free of any UI package. That matters because the
+    engine's whole premise is that it builds and its tests run with no package feed.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>ModManager.App</RootNamespace>
+    <AssemblyName>ModManager</AssemblyName>
+
+    <!--
+      WPF cannot run with invariant globalization: text measurement initialises real cultures
+      (MS.Internal.FontCache.MajorLanguages) and crashes with "Only the invariant culture is
+      supported" the moment any TextBlock is measured. The engine keeps the solution-wide
+      invariant setting; the UI overrides it back to full ICU globalization.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!--
+      The window is DPI-aware so the hand-written layout stays crisp on a scaled display. PerMonitorV2 is the
+      mode that also behaves correctly when a window is dragged between monitors with different scaling.
+    -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+
+    <!--
+      Long paths, because a game mod tree plus a staging path can exceed MAX_PATH. The engine also prefixes
+      Win32 calls with \\?\ for the same reason; declaring it here additionally covers the .NET file APIs and
+      the shell's own path handling.
+    -->
+    <EnableLongPaths>true</EnableLongPaths>
+
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModManager.Core\ModManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

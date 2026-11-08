@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ModManager.Tests — the acceptance suite.
+
+    The five invariants this project exists to protect are the ones Modrix states and tests for:
+    reversibility, idempotence, no-silent-clobber, crash safety and determinism. Beyond those, the user's
+    spec names specific things that must be proven rather than asserted, and each has a test here:
+
+      * path traversal and dangerous-path refusal   -> PathSafetyTests
+      * no deletion outside the game directory      -> PathSafetyTests, DeploymentTests
+      * crash recovery from a journal               -> JournalRecoveryTests
+      * protection of user-modified files           -> UserModificationProtectionTests
+      * smart mod-root detection with confidence    -> ModAnalyzerTests
+      * install preview matching the real plan      -> PlannerTests
+      * download failure recovery                   -> DownloadResumeTests
+      * profile switching redeploying               -> ProfileTests
+
+    Tests run against real temporary directories rather than a mocked filesystem. That is deliberate: every
+    invariant here is about what happens to files, and a fake filesystem would be a re-implementation whose
+    bugs would be indistinguishable from the engine's.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>ModManager.Tests</RootNamespace>
+    <AssemblyName>ModManager.Tests</AssemblyName>
+
+    <!--
+      Must match the application. The test SDK enables invariant globalization by default, and under it
+      CultureInfo("en") does not exist: WPF's font cache then fails to initialise and any test that lays out a
+      real control dies with a CultureNotFoundException that has nothing to do with the code under test. The
+      application itself runs with invariant mode off, and a test host that disagrees with it is not running
+      the same runtime the user does.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Both references need the extra ".." level. This project lives at tests/ModManager.Tests/, so the
+      sources are two levels up and then under src/. The previous single-level path
+      ("..\ModManager.Core\...") resolved to tests/ModManager.Core, which does not exist — MSBuild
+      reported MSB9008 and, worse, quietly carried on. That mattered: a test run that never referenced
+      the engine proves nothing, which is precisely the trap worth calling out here.
+    -->
+    <ProjectReference Include="..\..\src\ModManager.Core\ModManager.Core.csproj" />
+    <ProjectReference Include="..\..\src\ModManager.App\ModManager.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Locally generated archive fixtures (7z has no in-process writer in SharpCompress 1.0, so the
+      fixtures are produced once with the local py7zr tool instead of downloading anything).
+    -->
+    <None Include="Fixtures\*.7z" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
